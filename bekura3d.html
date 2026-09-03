@@ -186,6 +186,15 @@
         cursor:pointer;flex:none;padding:0}
   .legrow .sw.on{border-color:#fff}
   .legrow .cnt{font-size:12px;color:rgba(255,255,255,.5);width:18px;text-align:right;flex:none}
+  /* A native picker, so the free colour in საბაზისო reaches every colour rather than a
+     second, longer list of swatches. Chrome draws its own chrome inside the
+     field; strip it back so the control reads as one flat colour chip. */
+  #side input[type=color]{flex:1;min-width:0;height:26px;padding:2px;cursor:pointer;
+        background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);border-radius:7px}
+  #side input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+  #side input[type=color]::-webkit-color-swatch{border:0;border-radius:5px}
+  .mini[disabled]{opacity:.4;cursor:default}
+  .mini[disabled]:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.18)}
   .chk{font-size:13px;padding:3px 0;color:rgba(255,255,255,.55)}
   .chk.ok{color:var(--green)}
   .chk span{display:inline-block;width:18px;font-weight:700}
@@ -298,6 +307,8 @@
      <div class="vrow" style="margin-top:7px">
        <button class="vbtn" id="masswhitebtn" title="მოცულობები თეთრად, ზონის ფერის ნაცვლად">
          <span class="vi">◻</span>თეთრი მასები</button>
+       <button class="vbtn" id="humanbtn" title="1,75 მ სიმაღლის ადამიანი მონიშნულ ფიგურასთან">
+         <span class="vi">☖</span>ადამიანი</button>
      </div>
      <div class="seg" id="groundseg">
        <button id="gnd-map" class="on" title="ნახაზი: ქუჩების სახელები, ნაკვეთები, საზღვრები">რუკა</button>
@@ -831,6 +842,7 @@ function buildSite(town) {
 function toggleSite() {
   state.siteOn = !state.siteOn;
   if (siteMesh) siteMesh.visible = state.siteOn;
+  if (SC.scanRing) SC.scanRing.visible = state.siteOn;   // the scan has one too
   syncViewBtns();
   save();
 }
@@ -864,10 +876,18 @@ function syncViewBtns() {
   var b = document.getElementById("sitetgl");
   if (b) {
     b.classList.toggle("on", !!state.siteOn);
-    b.style.display = isCity() ? "" : "none";  // the school plot has no boundary
+    // The school plot is invented and the studio has no site, but the scan's
+    // working area was actually surveyed, so the tab that shows it needs the
+    // same on/off the map has: look at the hill, then put the brief back.
+    b.style.display = (isCity() || state.tab === "scan") ? "" : "none";
   }
   var wb = document.getElementById("masswhitebtn");
   if (wb) wb.style.display = isCity() ? "" : "none";   // a city display option
+  var hb = document.getElementById("humanbtn");
+  if (hb) {                          // the other way round: only where you model
+    hb.style.display = isCity() ? "none" : "";
+    hb.classList.toggle("on", !!SC.humanOn);
+  }
   var seg = document.getElementById("groundseg");
   if (seg) {
     // The school plot is invented ground and the scan already IS a photograph,
@@ -2338,6 +2358,10 @@ function renderLabels() {
       var s2 = schFind(SC.sel);
       if (s2) put(selCentroid(s2), SC.gizReadout, "lab giz");
     }
+    if (SC.humanG && SC.humanG.visible) {
+      var hp = SC.humanG.position;
+      put(new THREE.Vector3(hp.x, hp.y + HUMAN_H + 0.5, hp.z), "1,75 მ", "lab dim");
+    }
     if (state.view === "plan") {
       schItems().forEach(function (sh) {
         var c = shapeCentroid(sh.V);
@@ -2620,6 +2644,7 @@ document.getElementById("town").addEventListener("change", function () {
 
 document.getElementById("recenter").addEventListener("click", recenter);
 document.getElementById("masswhitebtn").addEventListener("click", function () { setTool("masswhite"); });
+document.getElementById("humanbtn").addEventListener("click", toggleHuman);
 document.getElementById("gnd-map").addEventListener("click", function () { setGround("map"); });
 document.getElementById("gnd-sat").addEventListener("click", function () { setGround("sat"); });
 document.getElementById("gnd-white").addEventListener("click", function () { setGround("white"); });
@@ -3019,6 +3044,11 @@ var SC = {
   sel: null,               // shape id
   subSel: null,            // {type, index}
   paintId: "bld",
+  // საბაზისო also paints outside the legend: paintFree swaps the bucket from
+  // the legend swatch to paintColor. useDoc turns it off on the way out, so a
+  // free colour can never leak into სკოლა, where a colour has to mean something.
+  paintFree: false,
+  paintColor: "#C7D2E1",
   snap: { on: false, move: 1, rot: 15, scale: 0.05 },
   group: new THREE.Group(),
   helpers: new THREE.Group()
@@ -3066,6 +3096,7 @@ function useDoc(which) {
   SC.data = d.data; SC.legend = d.legend; SC.planName = d.planName;
   SC.nextId = d.nextId; SC.variant = d.variant;
   SC.sel = null; SC.subSel = null;
+  if (which !== "basic") SC.paintFree = false;   // free colour is საბაზისო only
 }
 SC.docs.school.data = SC.data;      // start with the school doc live
 SC.docs.school.legend = SC.legend;
@@ -3113,20 +3144,52 @@ function buildScanEnv() {
   var grp = new THREE.Group();
   grp.visible = false;
   grp.add(mesh);
+  SC.scanMesh = mesh;                  // scanHeightAt rays against it below
 
-  // the surveyed working area, drawn over the capture in Blender
-  if (SITERING && SITERING.ring && SITERING.ring.length > 2) {
-    var pts = SITERING.ring.map(function (q) {
-      return new THREE.Vector3(q[0], scanHeightAt(g, q[0], q[1]) + 1.5, q[1]);
-    });
-    pts.push(pts[0].clone());
-    grp.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color: 0xE03A2F })));
+  // The surveyed working area. It used to read SITERING, which build.sh only
+  // fills when data/site-scan.json exists, so on every shipped build the scan
+  // tab had no red line at all. siteRing("scan") is the same lookup the city
+  // tab already uses and finds the ring in data/sites.json.
+  //
+  // A polyline through the nine corners is also the wrong shape here: the
+  // ground under it falls fifty metres, so most of it ended up inside the hill.
+  // A resampled ribbon lands on the capture the whole way round, and siteMat
+  // draws with depthTest off, so the brief stays legible from any angle.
+  var ring = siteRing("scan");
+  if (ring && ring.length > 2) {
+    var rm = new THREE.Mesh(scanRibbon(g, ring, 3), siteMat);
+    rm.renderOrder = 4;
+    rm.visible = state.siteOn;
+    grp.add(rm);
+    SC.scanRing = rm;
   }
 
   SC.scene.add(grp);
   SC.envScan = grp;
-  SC.scanMesh = mesh;
+}
+
+// ribbonOnTerrain samples a heightfield; the scan is a real mesh, so this walks
+// the same resampled polyline and drops each point onto the capture instead.
+function scanRibbon(geom, ring, W) {
+  var pos = [];
+  for (var e = 0; e < ring.length; e++) {
+    var a = ring[e], b = ring[(e + 1) % ring.length];
+    var seg = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    var n = Math.max(1, Math.round(seg / 12));
+    for (var i = 0; i < n; i++) {
+      var t0 = i / n, t1 = (i + 1) / n;
+      var x0 = a[0] + (b[0] - a[0]) * t0, z0 = a[1] + (b[1] - a[1]) * t0;
+      var x1 = a[0] + (b[0] - a[0]) * t1, z1 = a[1] + (b[1] - a[1]) * t1;
+      var dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz) || 1;
+      var ox = -dz / L * W / 2, oz = dx / L * W / 2;
+      var y0 = scanHeightAt(geom, x0, z0) + 0.6, y1 = scanHeightAt(geom, x1, z1) + 0.6;
+      pos.push(x0 - ox, y0, z0 - oz,  x1 + ox, y1, z1 + oz,  x1 - ox, y1, z1 - oz);
+      pos.push(x0 - ox, y0, z0 - oz,  x0 + ox, y0, z0 + oz,  x1 + ox, y1, z1 + oz);
+    }
+  }
+  var g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  return g;
 }
 
 // One downward ray against the capture. Used only when the ring is built, so a
@@ -3266,6 +3329,14 @@ function legendById(id) {
   for (var i = 0; i < SC.legend.length; i++) if (SC.legend[i].id === id) return SC.legend[i];
   return SC.legend[0];
 }
+// A shape's colour: its own if it has been given one, otherwise the legend's.
+// The override is a property of the shape, not of the tab, so a model keeps the
+// colours it was drawn with wherever it is opened. Only საბაზისო offers the
+// picker: on the school plan naming the six colours IS the exercise, and a
+// free palette would let a team skip it.
+function shColor(sh) {
+  return (sh && sh.color) ? sh.color : legendById(sh.legend).color;
+}
 
 // ---------------------------------------------------------------- site
 (function buildSchoolEnv() {          // renamed: buildSite(town) now draws the working-area boundary
@@ -3389,6 +3460,80 @@ function legendById(id) {
   SC.basicFloor = floor;
 })();
 
+// ---------------------------------------------------------------- human scale
+// Nothing in a modelling scene says how big anything is. A student's first box
+// is either a shoebox or a stadium and they cannot tell which, because there is
+// no known quantity on screen. This is that known quantity: 1,75 m, standing on
+// the ground next to whatever is selected, so the comparison is with the thing
+// being drawn rather than with the origin.
+var HUMAN_H = 1.75;
+SC.humanOn = false;
+
+(function buildHuman() {
+  var g = new THREE.Group();
+  g.visible = false;
+  var skin  = new THREE.MeshLambertMaterial({ color: 0xF0CBA6 });
+  var shirt = new THREE.MeshLambertMaterial({ color: 0x33BEC4 });
+  var legs  = new THREE.MeshLambertMaterial({ color: 0xC6D2E0 });
+  function part(w, h, d, x, y, z, mat) {
+    var m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    g.add(m);
+    return m;
+  }
+  part(0.13, 0.82, 0.16, -0.10, 0.41, 0, legs);      // legs, feet on the ground
+  part(0.13, 0.82, 0.16,  0.10, 0.41, 0, legs);
+  part(0.36, 0.16, 0.20,  0,    0.90, 0, legs);      // hips
+  part(0.40, 0.56, 0.22,  0,    1.26, 0, shirt);     // torso
+  part(0.10, 0.54, 0.12, -0.25, 1.24, 0, skin);      // arms
+  part(0.10, 0.54, 0.12,  0.25, 1.24, 0, skin);
+  var head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 10), skin);
+  head.position.y = 1.635;                            // 1.635 + 0.115 = 1.75
+  head.castShadow = true;
+  g.add(head);
+  SC.scene.add(g);
+  SC.humanG = g;
+})();
+
+// The ground is flat in the studio and on the plot, but the scan is a hillside,
+// so the figure has to be dropped onto the capture or it floats.
+function groundAt(x, z) {
+  if (SC.env === "scan" && SC.scanMesh) return scanHeightAt(SC.scanMesh.geometry, x, z);
+  return 0;
+}
+
+// Stand beside the selected shape, clear of its bounding box on the +X side.
+// With nothing selected the figure waits at the origin, which on the school
+// plot is the middle of the site and in the studio is where the axes cross.
+function placeHuman() {
+  var g = SC.humanG;
+  if (!g) return;
+  g.visible = SC.humanOn && !isCity();
+  if (!g.visible) return;
+  var x = 0, z = 0;
+  var sh = SC.sel != null ? schFind(SC.sel) : null;
+  if (sh) {
+    var hi = [-1e9, -1e9], lo = [1e9, 1e9];
+    for (var i = 0; i < sh.V.length; i++) {
+      if (sh.V[i][0] > hi[0]) hi[0] = sh.V[i][0];
+      if (sh.V[i][0] < lo[0]) lo[0] = sh.V[i][0];
+      if (sh.V[i][2] > hi[1]) hi[1] = sh.V[i][2];
+      if (sh.V[i][2] < lo[1]) lo[1] = sh.V[i][2];
+    }
+    x = sh.pos[0] + hi[0] + 1.4;
+    z = sh.pos[2] + (lo[1] + hi[1]) / 2;
+  }
+  g.position.set(x, groundAt(x, z), z);
+}
+
+function toggleHuman() {
+  SC.humanOn = !SC.humanOn;
+  placeHuman();
+  syncViewBtns();
+  schSave();
+}
+
 // ---------------------------------------------------------------- meshes
 // Normals depend on the shape's shade mode (like Blender):
 //   flat   — each face its own normal (default)
@@ -3451,7 +3596,7 @@ function schRebuild() {
   }
   schItems().forEach(function (sh) {
     var mesh = new THREE.Mesh(schBuildGeometry(sh), new THREE.MeshLambertMaterial({
-      color: new THREE.Color(legendById(sh.legend).color), side: THREE.DoubleSide
+      color: new THREE.Color(shColor(sh)), side: THREE.DoubleSide
     }));
     mesh.position.set(sh.pos[0], sh.pos[1], sh.pos[2]);
     mesh.castShadow = true;
@@ -3460,6 +3605,7 @@ function schRebuild() {
     SC.group.add(mesh);
   });
   schRefreshHelpers();
+  placeHuman();
   schRenderPanel();
 }
 
@@ -4080,6 +4226,19 @@ function snapTo(v, step) { return Math.round(v / step) * step; }
 function gizmoStart(ev, hit) {
   var sh = schFind(SC.sel);
   if (!sh) return false;
+  // 3ds Max: Shift on a move handle turns the drag into an extrude. push/pull
+  // already pulls a face along its own normal; this pulls the new volume along
+  // whichever gizmo axis was grabbed, which is the only way to get a wing off a
+  // sloped face. The duplicate is made in place, so the drag itself does the
+  // moving and a zero-length pull is undone like any other edit.
+  var extruded = false;
+  if (ev.shiftKey && SC.subSel && SC.subSel.type === "face" &&
+      (hit.kind === "move" || hit.kind === "moveplane")) {
+    schExtrude(sh, SC.subSel.index, 0);     // F[i] becomes the new face
+    regeom(sh);
+    schRefreshHelpers();
+    extruded = true;
+  }
   var origin = selCentroid(sh);
   var axis = hit.axis === "xyz" ? new THREE.Vector3(0, 1, 0) : axisById(hit.axis).v.clone();
   var d = { kind: hit.kind, axisId: hit.axis, axis: axis, origin: origin,
@@ -4102,6 +4261,7 @@ function gizmoStart(ev, hit) {
     d.a0 = gizAngle(ev, origin, axis);
     if (d.a0 === null) return false;
   }
+  if (extruded) d.changed = true;      // commit even if the pull ends up at zero
   GIZ.drag = d;
   return true;
 }
@@ -4322,6 +4482,14 @@ function schPointerDown(ev) {
     var vn = viewCubeHit(ev);
     if (vn) { snapToView(vn); return; }
   }
+  // Shift+drag pans, except on a move handle with a face selected, where it
+  // extrudes. Narrowed to exactly that case so panning is unchanged everywhere
+  // else, including shift over a gizmo with a whole object selected.
+  if (ev.button === 0 && ev.shiftKey && GIZ.mode === "move" &&
+      SC.subSel && SC.subSel.type === "face") {
+    var sgh = gizmoPick(ev);
+    if (sgh && gizmoStart(ev, sgh)) { hideCtxMenu(); return; }
+  }
   if (ev.button === 1 || (ev.button === 2 && ev.shiftKey) || (ev.button === 0 && ev.shiftKey)) {
     schDrag = { mode: "pan", x: ev.clientX, y: ev.clientY };
     return;
@@ -4382,7 +4550,11 @@ function schPointerDown(ev) {
   if (SC.tool === "pick") {                       // eyedropper
     if (hit) {
       var s = schFind(hit.object.userData.id);
-      if (s) { SC.paintId = s.legend; schRenderPanel(); }
+      // picking up a free colour also switches the bucket to free, or the next
+      // click would repaint with a legend colour the student never chose
+      if (s && s.color) { SC.paintColor = s.color; SC.paintFree = true; }
+      else if (s) { SC.paintId = s.legend; SC.paintFree = false; }
+      if (s) schRenderPanel();
     }
     setSchTool("select");
     return;
@@ -4390,7 +4562,12 @@ function schPointerDown(ev) {
   if (SC.tool === "paint") {
     if (hit) {
       var s = schFind(hit.object.userData.id);
-      if (s) { s.legend = SC.paintId; schRebuild(); schSave(); }
+      if (s && SC.paintFree) { s.color = SC.paintColor; schRebuild(); schSave(); }
+      else if (s) {
+        s.legend = SC.paintId;
+        delete s.color;                 // back under the legend, and it shows
+        schRebuild(); schSave();
+      }
     }
     return;
   }
@@ -4610,9 +4787,11 @@ function setSchTool(t) {
     h = SC.sub === "object"
       ? "გადაათრიე ფიგურა გადასატანად. მარჯვენა ღილაკი ატრიალებს."
       : (SC.sub === "face"
-         ? "გადაათრიე წახნაგი — ის ამოიწევა (extrude), როგორც SketchUp-ში."
+         ? "გადაათრიე წახნაგი და ის ამოიწევა. <kbd>Shift</kbd> ღერძის ისარზე ამოწევს ამ ღერძით."
          : "გადაათრიე მოსანიშნი. <kbd>Shift</kbd> — მაღლა და დაბლა.");
-  } else if (t === "paint") h = "დააწკაპუნე ფიგურაზე, რომ ლეგენდის ფერი მიანიჭო.";
+  } else if (t === "paint") h = SC.paintFree
+    ? "დააწკაპუნე ფიგურაზე, რომ შენი ფერი მიანიჭო."
+    : "დააწკაპუნე ფიგურაზე, რომ ლეგენდის ფერი მიანიჭო.";
   else if (t === "pick")   h = "დააწკაპუნე ფიგურაზე, რომ მისი ფერი აიღო.";
   else if (t === "tape")   h = "დააწკაპუნე საწყის წერტილზე, გადაიტანე და კვლავ დააწკაპუნე. <kbd>Esc</kbd> ასუფთავებს.";
   else if (t === "subtract") h = "დააწკაპუნე ფიგურას, რომელიც უნდა გამოაკლო. <kbd>Esc</kbd> აუქმებს.";
@@ -4700,6 +4879,14 @@ function schRenderPanel() {
            legName(L) + "</option>";
     });
     h += "</select></div>";
+    // The picker starts on whatever the shape is already showing, so the first
+    // drag is a change from where the student is, not a jump to an unrelated
+    // colour. ლეგენდას hands it back and is dead until there is something to undo.
+    if (SC.activeDoc === "basic")
+      h += '<div class="row"><label>ფერი</label>' +
+           '<input type="color" id="shColorI" value="' + shColor(sh) + '">' +
+           '<button class="mini" id="shColorX"' + (sh.color ? "" : " disabled") +
+           ' title="ფერი კვლავ ლეგენდიდან">ლეგენდას</button></div>';
     var what = SC.subSel ? SUBMODES.filter(function (s) { return s.id === SC.subSel.type; })[0] : null;
     h += '<div class="row"><label>' + (what ? what.ka : "ფიგურა") + '</label>' +
          '<button class="mini" id="scDn">−</button><button class="mini" id="scUp">+</button>' +
@@ -4755,13 +4942,29 @@ function schRenderPanel() {
 
   h += '<section><h3>ᲚᲔᲒᲔᲜᲓᲐ</h3><p class="empty">დაარქვი ფერს სახელი — ეს არის ლეგენდა.</p>';
   SC.legend.forEach(function (L) {
-    h += '<div class="legrow"><button class="sw' + (SC.paintId === L.id ? " on" : "") +
+    h += '<div class="legrow"><button class="sw' +
+         ((!SC.paintFree && SC.paintId === L.id) ? " on" : "") +
          '" data-leg="' + L.id + '" style="background:' + L.color + '"></button>' +
          '<input class="legname" data-leg="' + L.id + '" type="text" placeholder="' + L.req + '" value="' +
          (L.ka || "").replace(/"/g, "&quot;") + '">' +
          '<span class="cnt">' + (used[L.id] || 0) + "</span></div>";
   });
   h += "</section>";
+
+  // საბაზისო is where the tools are learned, not where a masterplan is read, so
+  // it gets a colour that stands for nothing. The counter is honest about how
+  // many shapes have stepped outside the legend.
+  if (SC.activeDoc === "basic") {
+    var freeN = 0;
+    schItems().forEach(function (s) { if (s.color) freeN++; });
+    h += '<section><h3>ᲨᲔᲜᲘ ᲤᲔᲠᲘ</h3>' +
+         '<div class="legrow"><button class="sw' + (SC.paintFree ? " on" : "") +
+         '" id="freeSw" title="შეღებვა ამ ფერით" style="background:' + SC.paintColor + '"></button>' +
+         '<input type="color" id="freeC" value="' + SC.paintColor + '">' +
+         '<span class="cnt">' + freeN + '</span></div>' +
+         '<p class="empty">აქ ფერი თავისუფალია. სკოლის გეგმაზე კი ყოველი ფერი ' +
+         'მნიშვნელობას ატარებს.</p></section>';
+  }
 
   h += '<section><h3>ᲞᲠᲝᲒᲠᲐᲛᲐ</h3>';
   var missing = 0;
@@ -4873,12 +5076,49 @@ function schRenderPanel() {
     schSave();
   }
 
-  box.querySelectorAll(".sw").forEach(function (sw) {
-    sw.onclick = function () { SC.paintId = this.dataset.leg; setSchTool("paint"); schRenderPanel(); };
+  // [data-leg] on purpose: the free swatch is a .sw too, and it carries no id
+  box.querySelectorAll(".sw[data-leg]").forEach(function (sw) {
+    sw.onclick = function () {
+      SC.paintId = this.dataset.leg; SC.paintFree = false;
+      setSchTool("paint"); schRenderPanel();
+    };
   });
   box.querySelectorAll(".legname").forEach(function (inp) {
     inp.oninput = function () { legendById(this.dataset.leg).ka = this.value; schSave(); };
   });
+
+  // Dragging inside a colour picker fires input on every pixel of movement.
+  // schRebuild would replace the input mid drag and schSave would fill the undo
+  // history with one colour change, so input repaints the single mesh and the
+  // commit waits for change, which fires once when the picker closes.
+  var ci = document.getElementById("shColorI");
+  if (ci) {
+    ci.oninput = function () {
+      sh.color = this.value;
+      var m = schMeshFor(sh.id);
+      if (m) m.material.color.set(this.value);
+    };
+    ci.onchange = function () { sh.color = this.value; schRebuild(); schSave(); };
+  }
+  var cx = document.getElementById("shColorX");
+  if (cx) cx.onclick = function () { delete sh.color; schRebuild(); schSave(); };
+
+  var fs = document.getElementById("freeSw");
+  if (fs) fs.onclick = function () {
+    SC.paintFree = true; setSchTool("paint"); schRenderPanel();
+  };
+  var fc = document.getElementById("freeC");
+  if (fc) {
+    fc.oninput = function () {
+      SC.paintColor = this.value;
+      var b = document.getElementById("freeSw");
+      if (b) b.style.background = this.value;     // keep the swatch in step
+    };
+    fc.onchange = function () {
+      SC.paintColor = this.value; SC.paintFree = true;
+      setSchTool("paint"); schRenderPanel();
+    };
+  }
 }
 
 // ---------------------------------------------------------------- persistence
@@ -4886,7 +5126,8 @@ function schSave() {
   flushDoc();
   try {
     localStorage.setItem(KEY.school, JSON.stringify({
-      docs: SC.docs, active: SC.activeDoc, snap: SC.snap, light: SC.light
+      docs: SC.docs, active: SC.activeDoc, snap: SC.snap, light: SC.light,
+      human: SC.humanOn
     }));
   } catch (e) { /* private mode */ }
   histCommit();
@@ -5081,6 +5322,7 @@ function schLoad() {
     SC.nextId = d.nextId; SC.variant = d.variant;
     if (o.snap) SC.snap = o.snap;
     if (o.light) SC.light = o.light;
+    if (typeof o.human === "boolean") SC.humanOn = o.human;
   } catch (e) { /* ignore */ }
 }
 
@@ -5117,6 +5359,7 @@ function setTab(t) {
       SC.orbit.dist = 760; SC.orbit.az = -0.7; SC.orbit.el = 0.55; SC.orbit.planZoom = 300;
     }
     setSchSub(SC.sub); setSchTool(SC.tool); setGizMode(GIZ.mode); schRebuild();
+    placeHuman();
     var sb = document.querySelector("#railSchool .snapbtn");
     if (sb) sb.classList.toggle("on", SC.snap.on);
   }
@@ -5348,6 +5591,27 @@ if (/[?&]selftest=1/.test(location.search)) {
   want("extrude adds vertices", ex.V.length === nv0 + 4 ? "yes" : "no", "yes");
   want("extrude raises the face 5 m", Math.abs((y1 - y0) - 5) < 0.001 ? "yes" : "no", "yes");
 
+  // Shift + axis drag duplicates the face in place and lets the gizmo move it.
+  // F[i] has to become the NEW face, or the drag would haul the original back.
+  var zx = pBox(10, 10, 10);
+  var zsh = { kind: "box", pos: [0,0,0], V: zx.V, F: zx.F };
+  var zBefore = zsh.F[1].slice(), znv = schExtrude(zsh, 1, 0);
+  want("a zero extrude hands the gizmo the new face",
+       zsh.F[1].join(",") === znv.join(",") ? "yes" : "no", "yes");
+  want("and leaves the original ring behind",
+       znv.some(function (v) { return zBefore.indexOf(v) >= 0; }) ? "shared" : "new", "new");
+
+  // the scan's red boundary: a ring to draw, resampled rather than corner to corner
+  var sr = siteRing("scan");
+  want("the scan tab finds a working area to draw",
+       (sr && sr.length > 2) ? "yes" : "no", "yes");
+  var _sm = SC.scanMesh;
+  SC.scanMesh = null;
+  var rib = scanRibbon({ boundingBox: null }, [[0,0],[100,0],[100,100],[0,100]], 3);
+  SC.scanMesh = _sm;
+  want("the boundary is resampled, not joined corner to corner",
+       rib.attributes.position.count > 24 ? "yes" : "no", "yes");
+
   // scaling a face keeps its centre put
   var sc2 = makePrim("box");
   orientFaces(sc2);
@@ -5381,6 +5645,12 @@ if (/[?&]selftest=1/.test(location.search)) {
        Math.abs(pb[1].dot(axisById("z").v)) < 1e-9 ? "yes" : "no", "yes");
 
   // ---- lighting / sky -----------------------------------------------------
+  // applyLighting returns early with the flat studio backdrop while SC.env is
+  // "basic", so these assertions have to pin the environment the way the camera
+  // ones pin the tab. Without it, opening ?selftest=1 after a session that ended
+  // on საბაზისო reported a failing sky that was in fact behaving correctly.
+  var savedEnv = SC.env;
+  SC.env = "school";
   var savedL = JSON.parse(JSON.stringify(SC.light));
   SC.light.sun = 0.9; SC.light.el = 60; SC.light.mode = "natural"; applyLighting();
   want("sun intensity tracks the slider", schSun.intensity.toFixed(2), "0.90");
@@ -5393,7 +5663,7 @@ if (/[?&]selftest=1/.test(location.search)) {
   want("white sky kills the sun glow", skyMat.uniforms.sunGlow.value === 0 ? "yes" : "no", "yes");
   want("white sky is white at the top",
        skyMat.uniforms.topColor.value.getHexString() === "ffffff" ? "yes" : "no", "yes");
-  SC.light = savedL; applyLighting();
+  SC.light = savedL; SC.env = savedEnv; applyLighting();
 
   // ---- inset --------------------------------------------------------------
   var insBox = pBox(10, 10, 10);
@@ -5470,6 +5740,48 @@ if (/[?&]selftest=1/.test(location.search)) {
   hist.ready = _hr; hist.stack = _hs; hist.pos = _hp; SC.data.A = _hd;
   SC.docs = JSON.parse(docSaved); SC.activeDoc = actSaved; SC.data = dataSaved;
   state.tab = _tabSpoof;                          // the view-cube checks want it back
+
+  // ---- free colour in საბაზისო --------------------------------------------
+  var _legSave = SC.legend, _freeSave = SC.paintFree;
+  SC.legend = JSON.parse(JSON.stringify(LEGEND0));
+  want("a shape with no colour of its own follows the legend",
+       shColor({ legend: "sport" }), "#E08A3C");
+  want("a shape's own colour wins over the legend",
+       shColor({ legend: "sport", color: "#123456" }), "#123456");
+  SC.legend = _legSave;
+  var _docs2 = JSON.stringify(SC.docs), _act2 = SC.activeDoc, _data2 = SC.data;
+  SC.docs = { school: newDoc(), basic: newDoc(), scan: newScanDoc() };
+  SC.activeDoc = "basic"; SC.data = SC.docs.basic.data; SC.legend = SC.docs.basic.legend;
+  SC.paintFree = true;
+  useDoc("school");
+  want("leaving საბაზისო puts the bucket back on the legend",
+       SC.paintFree ? "free" : "legend", "legend");
+  SC.docs = JSON.parse(_docs2); SC.activeDoc = _act2; SC.data = _data2;
+  SC.legend = _legSave; SC.paintFree = _freeSave;
+
+  // ---- the human for scale -------------------------------------------------
+  var _hp0 = SC.humanG.position.clone();
+  SC.humanG.position.set(0, 0, 0);
+  var hbb = new THREE.Box3().setFromObject(SC.humanG);
+  want("the scale figure is 1,75 m tall", (hbb.max.y - hbb.min.y).toFixed(2), "1.75");
+  want("and its feet are on the ground", hbb.min.y.toFixed(2), "0.00");
+  SC.humanG.position.copy(_hp0);
+
+  var _hOn = SC.humanOn, _hSel = SC.sel, _hEnv = SC.env, _hTab = state.tab;
+  var _hDocs = JSON.stringify(SC.docs), _hAct = SC.activeDoc, _hData = SC.data;
+  state.tab = "school"; SC.env = "school";
+  SC.docs = { school: newDoc(), basic: newDoc(), scan: newScanDoc() };
+  SC.activeDoc = "school"; SC.data = SC.docs.school.data;
+  var hbx = pBox(20, 10, 12);                      // x -10..10, z -6..6
+  SC.data.A.push({ id: 4242, kind: "box", pos: [30, 0, 6], V: hbx.V, F: hbx.F });
+  SC.sel = 4242; SC.humanOn = true;
+  placeHuman();
+  want("the figure stands clear of the selected shape",
+       (SC.humanG.position.x - 40).toFixed(1), "1.4");
+  want("and lines up with the middle of it", SC.humanG.position.z.toFixed(1), "6.0");
+  SC.humanOn = _hOn; SC.sel = _hSel; SC.env = _hEnv; state.tab = _hTab;
+  SC.docs = JSON.parse(_hDocs); SC.activeDoc = _hAct; SC.data = _hData;
+  placeHuman();
 
   // ---- shading, segments, environment -------------------------------------
   var bx = pBox(10, 10, 10);
