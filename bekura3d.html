@@ -307,7 +307,7 @@
      <div class="vrow" style="margin-top:7px">
        <button class="vbtn" id="masswhitebtn" title="მოცულობები თეთრად, ზონის ფერის ნაცვლად">
          <span class="vi">◻</span>თეთრი მასები</button>
-       <button class="vbtn" id="humanbtn" title="1,75 მ სიმაღლის ადამიანი მონიშნულ ფიგურასთან">
+       <button class="vbtn" id="humanbtn" title="1,75 მ სიმაღლის ადამიანი. ადგილს მარცხენა პანელის ხელსაწყოთი ირჩევ">
          <span class="vi">☖</span>ადამიანი</button>
      </div>
      <div class="seg" id="groundseg">
@@ -3468,6 +3468,11 @@ function shColor(sh) {
 // being drawn rather than with the origin.
 var HUMAN_H = 1.75;
 SC.humanOn = false;
+// Where the figure has been put, per tab, as [x, z] in world metres. null means
+// it has not been placed yet and still follows the selection, which is useful
+// on the first shape and a nuisance from the second one on: it kept walking
+// away from whatever the student was actually looking at.
+SC.humanPos = { school: null, basic: null, scan: null };
 
 (function buildHuman() {
   var g = new THREE.Group();
@@ -3492,6 +3497,20 @@ SC.humanOn = false;
   head.position.y = 1.635;                            // 1.635 + 0.115 = 1.75
   head.castShadow = true;
   g.add(head);
+
+  // A person is 1,75 m in a scene framed at 200 m and the scan is framed at
+  // 760: true to scale, the figure is two pixels and the student cannot find
+  // what they just placed. This ring is still honest about size, 2,4 m across
+  // at their feet, but it draws over the ground so it is findable from any
+  // distance and reads in plan, where the figure alone is a dot.
+  var ring = new THREE.Mesh(new THREE.RingGeometry(1.0, 1.2, 40),
+    new THREE.MeshBasicMaterial({ color: 0x33BEC4, side: THREE.DoubleSide,
+                                  transparent: true, opacity: .85, depthTest: false }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.04;
+  ring.renderOrder = 5;
+  g.add(ring);
+
   SC.scene.add(g);
   SC.humanG = g;
 })();
@@ -3503,14 +3522,20 @@ function groundAt(x, z) {
   return 0;
 }
 
-// Stand beside the selected shape, clear of its bounding box on the +X side.
-// With nothing selected the figure waits at the origin, which on the school
-// plot is the middle of the site and in the studio is where the axes cross.
+// Once it has been put somewhere it stays there, full stop. Until then it
+// stands beside the selected shape, clear of its bounding box on the +X side,
+// and with nothing selected it waits at the origin: the middle of the school
+// plot, and where the axes cross in the studio.
 function placeHuman() {
   var g = SC.humanG;
   if (!g) return;
   g.visible = SC.humanOn && !isCity();
   if (!g.visible) return;
+  var put = SC.humanPos[SC.activeDoc];
+  if (put) {
+    g.position.set(put[0], groundAt(put[0], put[1]), put[1]);
+    return;
+  }
   var x = 0, z = 0;
   var sh = SC.sel != null ? schFind(SC.sel) : null;
   if (sh) {
@@ -3529,6 +3554,17 @@ function placeHuman() {
 
 function toggleHuman() {
   SC.humanOn = !SC.humanOn;
+  placeHuman();
+  syncViewBtns();
+  schSave();
+}
+
+// Drop the figure where the cursor is. On the scan that is the hillside itself,
+// because schGroundPoint rays the capture rather than a plane at zero.
+function putHuman(p) {
+  if (!p) return;
+  SC.humanPos[SC.activeDoc] = [p.x, p.z];
+  SC.humanOn = true;
   placeHuman();
   syncViewBtns();
   schSave();
@@ -4398,6 +4434,7 @@ function schSelect(id, sub) {
   SC.sel = id;
   SC.subSel = sub || null;
   schRefreshHelpers();
+  placeHuman();                  // only moves while it has not been placed
   schRenderPanel();
 }
 
@@ -4518,6 +4555,12 @@ function schPointerDown(ev) {
     schSelect(sh.id, null);
     setSchTool("select");
     schSave();
+    return;
+  }
+
+  if (SC.tool === "human") {
+    putHuman(schGroundPoint(ev, 0));
+    setSchTool("select");
     return;
   }
 
@@ -4793,6 +4836,7 @@ function setSchTool(t) {
     ? "დააწკაპუნე ფიგურაზე, რომ შენი ფერი მიანიჭო."
     : "დააწკაპუნე ფიგურაზე, რომ ლეგენდის ფერი მიანიჭო.";
   else if (t === "pick")   h = "დააწკაპუნე ფიგურაზე, რომ მისი ფერი აიღო.";
+  else if (t === "human")  h = "დააწკაპუნე მიწაზე, სადაც გინდა, რომ ადამიანი დადგეს. სიმაღლე 1,75 მ.";
   else if (t === "tape")   h = "დააწკაპუნე საწყის წერტილზე, გადაიტანე და კვლავ დააწკაპუნე. <kbd>Esc</kbd> ასუფთავებს.";
   else if (t === "subtract") h = "დააწკაპუნე ფიგურას, რომელიც უნდა გამოაკლო. <kbd>Esc</kbd> აუქმებს.";
   document.getElementById("hint").innerHTML = h;
@@ -4829,6 +4873,8 @@ function setSchSub(s) {
        '<button class="tool snapbtn" data-snap="1"><span class="ic">⌗</span>მიბმა</button>' +
        '<button class="tool" data-stool="tape"><span class="ic">📏</span>რულეტი</button>' +
        '<button class="tool" data-stool="subtract"><span class="ic">⊖</span>გამოკლება</button>';
+  h += '<div class="railcap">მასშტაბი</div>' +
+       '<button class="tool" data-stool="human"><span class="ic">☖</span>ადამიანი</button>';
   h += '<div class="railcap">ფერი</div>' +
        '<button class="tool" data-stool="paint"><span class="ic">🪣</span>შეღებვა</button>' +
        '<button class="tool" data-stool="pick"><span class="ic">💧</span>ფერის აღება</button>';
@@ -5127,7 +5173,7 @@ function schSave() {
   try {
     localStorage.setItem(KEY.school, JSON.stringify({
       docs: SC.docs, active: SC.activeDoc, snap: SC.snap, light: SC.light,
-      human: SC.humanOn
+      human: SC.humanOn, humanPos: SC.humanPos
     }));
   } catch (e) { /* private mode */ }
   histCommit();
@@ -5323,6 +5369,12 @@ function schLoad() {
     if (o.snap) SC.snap = o.snap;
     if (o.light) SC.light = o.light;
     if (typeof o.human === "boolean") SC.humanOn = o.human;
+    if (o.humanPos) {
+      ["school", "basic", "scan"].forEach(function (k) {
+        var v = o.humanPos[k];
+        if (v && v.length === 2) SC.humanPos[k] = [+v[0], +v[1]];
+      });
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -5762,10 +5814,14 @@ if (/[?&]selftest=1/.test(location.search)) {
   // ---- the human for scale -------------------------------------------------
   var _hp0 = SC.humanG.position.clone();
   SC.humanG.position.set(0, 0, 0);
-  var hbb = new THREE.Box3().setFromObject(SC.humanG);
+  var hbb = new THREE.Box3();
+  SC.humanG.children.forEach(function (c) {          // the locator ring is wider
+    if (c.geometry && c.geometry.type !== "RingGeometry") hbb.expandByObject(c);
+  });
   want("the scale figure is 1,75 m tall", (hbb.max.y - hbb.min.y).toFixed(2), "1.75");
   want("and its feet are on the ground", hbb.min.y.toFixed(2), "0.00");
   SC.humanG.position.copy(_hp0);
+
 
   var _hOn = SC.humanOn, _hSel = SC.sel, _hEnv = SC.env, _hTab = state.tab;
   var _hDocs = JSON.stringify(SC.docs), _hAct = SC.activeDoc, _hData = SC.data;
@@ -5779,6 +5835,12 @@ if (/[?&]selftest=1/.test(location.search)) {
   want("the figure stands clear of the selected shape",
        (SC.humanG.position.x - 40).toFixed(1), "1.4");
   want("and lines up with the middle of it", SC.humanG.position.z.toFixed(1), "6.0");
+  SC.humanPos[SC.activeDoc] = [7, -3];
+  placeHuman();
+  want("a placed figure stays put when the selection changes",
+       (Math.abs(SC.humanG.position.x - 7) < 1e-6 &&
+        Math.abs(SC.humanG.position.z + 3) < 1e-6) ? "put" : "moved", "put");
+  SC.humanPos[SC.activeDoc] = null;
   SC.humanOn = _hOn; SC.sel = _hSel; SC.env = _hEnv; state.tab = _hTab;
   SC.docs = JSON.parse(_hDocs); SC.activeDoc = _hAct; SC.data = _hData;
   placeHuman();
