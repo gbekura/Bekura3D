@@ -1,0 +1,20 @@
+# GitHub Desktop sets core.autocrlf=true on Windows, so a clone rewrites every
+# text file to CRLF on the way out. Two things break when that happens: bash
+# refuses a script whose lines end in \r ("$'\r': command not found", which is
+# build.sh dead on arrival), and awk carries the stray \r through the marker
+# substitution into the built page. Pinning the endings here means a checkout no
+# longer depends on how each machine has git configured.
+
+# Normalise text to LF in the repository and check it back out that way.
+* text=auto eol=lf
+
+# The two that genuinely cannot survive CRLF: bash reads them.
+*.sh text eol=lf
+
+# Never convert and never try to diff these.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.ttf  binary
+*.json text eol=lf
