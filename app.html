@@ -2384,9 +2384,7 @@ function histCommit() {
 function histRestore(snap) {
   var o = JSON.parse(snap);
   SC.docs = o.docs;
-  if (!SC.docs.school) SC.docs.school = newDoc();
-  if (!SC.docs.basic) SC.docs.basic = newDoc();
-  if (!SC.docs.scan) SC.docs.scan = newScanDoc();
+  docFor("school"); docFor("basic"); docFor("scan");
   // Show the doc for the tab we are on, not the one that was active at capture.
   // Every modelling tab has its own document, so this has to name the tab: a
   // two-way test sent სკანი to the school document and quietly undid the wrong
@@ -3041,15 +3039,22 @@ function newScanDoc() {
 SC.docs = { school: newDoc(), basic: newDoc(), scan: newScanDoc() };
 SC.activeDoc = "school";
 function flushDoc() {
-  var d = SC.docs[SC.activeDoc];
+  var d = docFor(SC.activeDoc);
   d.data = SC.data; d.legend = SC.legend; d.planName = SC.planName;
   d.nextId = SC.nextId; d.variant = SC.variant;
 }
+// The one place that promises a document exists. A file saved before a tab was
+// added has no document for it, and both callers used to dereference the hole.
+function docFor(which) {
+  if (!SC.docs[which]) SC.docs[which] = (which === "scan") ? newScanDoc() : newDoc();
+  return SC.docs[which];
+}
+
 function useDoc(which) {
   if (which === SC.activeDoc) return;
   flushDoc();
   SC.activeDoc = which;
-  var d = SC.docs[which];
+  var d = docFor(which);
   SC.data = d.data; SC.legend = d.legend; SC.planName = d.planName;
   SC.nextId = d.nextId; SC.variant = d.variant;
   SC.sel = null; SC.subSel = null;
@@ -4988,8 +4993,7 @@ function adoptSeed() {
     }
     if (seed.docs) {
       SC.docs = seed.docs;
-      if (!SC.docs.school) SC.docs.school = newDoc();
-      if (!SC.docs.basic) SC.docs.basic = newDoc();
+      docFor("school"); docFor("basic"); docFor("scan");
       SC.activeDoc = seed.active || "school";
       if (seed.planName) SC.planName = seed.planName;
       if (seed.snap) SC.snap = seed.snap;
@@ -5055,8 +5059,7 @@ function schLoad() {
     var o = JSON.parse(raw);
     if (o.docs) {
       SC.docs = o.docs;
-      if (!SC.docs.school) SC.docs.school = newDoc();
-      if (!SC.docs.basic) SC.docs.basic = newDoc();
+      docFor("school"); docFor("basic"); docFor("scan");
     } else if (o.data) {
       // migrate the old single-document format into the school doc
       SC.docs.school = { data: o.data, legend: o.legend || newDoc().legend,

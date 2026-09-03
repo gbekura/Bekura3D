@@ -44,7 +44,7 @@ deliberately: that history contains a tracked Chrome profile with Cookies and
 Login Data, and a filtered copy would have carried it. Nothing of the sort is
 here, checked before committing.
 
-28 files, 42 MB, of which `bekura3d.html` is 13.3 MB. That bundle is the point —
+28 files, 42 MB, of which `bekura3d.html` is 13.3 MB. That bundle is the point -
 students double-click it, so it ships built. `?selftest=1` runs 83 assertions in
 the page and all 83 pass on this commit, rebuilt after the folder rename.
 
@@ -59,5 +59,5 @@ git clone https://github.com/gbekura/Bekura3D.git
 ```
 
 Open `bekura3d.html`; `git pull` for updates. A pull cannot overwrite a team's
-work — that lives in browser storage and in `bekura3d-data.js`, which is
+work, that lives in browser storage and in `bekura3d-data.js`, which is
 gitignored.
