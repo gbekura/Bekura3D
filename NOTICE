@@ -1,0 +1,30 @@
+Third-party terms
+=================
+
+Bekura3D itself is MIT (see LICENSE). What it bundles is not all MIT, and the
+attribution shown inside the app has to stay there.
+
+Map data
+  (c) OpenStreetMap contributors, licensed under the Open Database Licence
+  (ODbL). Tiles rendered from the OSM standard style.
+
+Aerial imagery
+  Esri World Imagery: Esri, Maxar, Earthstar Geographics and the GIS user
+  community.
+
+Terrain
+  SRTM, public domain.
+
+Drone survey
+  The Lisi photogrammetry capture is (c) Giorgi Bekurashvili and is published
+  with this repository under the same MIT terms as the software.
+
+3D engine
+  three.js r149, MIT licence, bundled in lib/three.min.js.
+
+Boolean geometry
+  csg.js (Evan Wallace), MIT licence, a trimmed copy inlined in the page.
+
+Typeface
+  DejaVu Sans, a free Bitstream Vera derivative, embedded in the bundle so the
+  same Georgian letters render on any machine.

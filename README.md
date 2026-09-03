@@ -341,8 +341,9 @@ is the newer copy and always wins. On adoption the seed is written straight into
 
 MIT — see [LICENSE](LICENSE). Use it, change it, teach with it.
 
-The map data, the aerial imagery and the drone survey have their own terms; the Credits
-above are not decoration, and the attribution shown in the app has to stay there.
+What it bundles is not all MIT: the map data is ODbL, the aerial imagery is Esri's, and
+the attribution shown inside the app has to stay there. [NOTICE](NOTICE) sets out each
+one.
 
 ## Known limits
 
