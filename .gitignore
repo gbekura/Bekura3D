@@ -1,0 +1,17 @@
+# A trainer's own saved work, written by the მონაცემები button and read back by
+# the app on startup. It sits beside the built page on purpose, so shipping a
+# new build cannot touch it — which also means it is not source.
+bekura3d-data.js
+
+# Tile cache. data/make-maps.sh refills it from OpenStreetMap and Esri; it is a
+# few hundred megabytes of somebody else's tiles and does not belong in git.
+data/tiles/
+
+# Throwaway Chrome profile left by data/make-data.sh. Holds Cookies and
+# Login Data. The script is kept, the profile is not.
+data/cprof/
+
+# OS and editor noise
+Thumbs.db
+desktop.ini
+.DS_Store

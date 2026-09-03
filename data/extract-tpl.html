@@ -1,0 +1,179 @@
+<!doctype html><meta charset="utf-8"><pre id="out">running</pre>
+<script src="mvt.js"></script>
+<script>
+window.onerror = function (e) {
+  document.getElementById("out").textContent = "===BEGIN===\nERR " + e + "\n===END===";
+};
+(function () {
+"use strict";
+var R = 6378137, ZV = 14, ZT = 13, GRID = 129;
+
+// { id: {lat, lon, half, size, vt:[{x,y,b64}], dem:[{x,y,b64}] } } — line below is substituted
+var TOWNS =
+__TOWNS__
+;
+
+// paved width in metres by OSM street kind
+var WIDTH = {
+  motorway: 16, motorway_link: 10, trunk: 15, trunk_link: 9,
+  primary: 13, primary_link: 8, secondary: 11, secondary_link: 7,
+  tertiary: 9, tertiary_link: 6, unclassified: 7, residential: 7,
+  living_street: 6, pedestrian: 5, service: 4.5, track: 4,
+  footway: 2.5, path: 2.5, cycleway: 3, steps: 2.5
+};
+
+var report = [], result = {};
+
+function merc(lon, lat) {
+  return [R * lon * Math.PI / 180,
+          R * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))];
+}
+function toLocal(lon, lat, c, k) {
+  var m = merc(lon, lat);
+  return [(m[0] - c[0]) * k, -(m[1] - c[1]) * k];
+}
+function tilePtToLonLat(tx, ty, px, py, extent, z) {
+  var n = Math.pow(2, z);
+  var wx = (tx + px / extent) / n, wy = (ty + py / extent) / n;
+  return [wx * 360 - 180,
+          Math.atan(Math.sinh(Math.PI * (1 - 2 * wy))) * 180 / Math.PI];
+}
+
+function decodeTiles(list) {
+  return list.map(function (t) {
+    var bin = atob(t.b64), buf = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    return { x: t.x, y: t.y, layers: MVT.readTile(buf) };
+  });
+}
+
+function run(id) {
+  var T = TOWNS[id];
+  var c = merc(T.lon, T.lat), k = Math.cos(T.lat * Math.PI / 180), half = T.half;
+  var buildings = [], streets = [];
+
+  decodeTiles(T.vt).forEach(function (tile) {
+    var B = tile.layers["buildings"];
+    if (B) B.features.forEach(function (f) {
+      f.rings.forEach(function (ring) {
+        if (ring.length < 6) return;
+        if (MVT.ringArea(ring) <= 0) return;            // inner ring / courtyard
+        var pts = [], minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+        for (var i = 0; i < ring.length; i += 2) {
+          var ll = tilePtToLonLat(tile.x, tile.y, ring[i], ring[i + 1], B.extent, ZV);
+          var p = toLocal(ll[0], ll[1], c, k);
+          pts.push(Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10);
+          if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
+          if (p[1] < minZ) minZ = p[1]; if (p[1] > maxZ) maxZ = p[1];
+        }
+        if (maxX < -half || minX > half || maxZ < -half || minZ > half) return;
+        var w = maxX - minX, d = maxZ - minZ;
+        if (w < 2 || d < 2 || w > 400 || d > 400) return;
+        buildings.push(pts);
+      });
+    });
+
+    var S = tile.layers["streets"];
+    if (S) S.features.forEach(function (f) {
+      if (f.type !== 2) return;                          // LineString only
+      var kind = f.props.kind;
+      if (f.props.rail) return;
+      var w = WIDTH[kind];
+      if (!w) return;
+      f.rings.forEach(function (line) {
+        if (line.length < 4) return;
+        // Split into runs that stay on the site. Without this, a street carries
+        // on past the square and its ribbon hangs in mid-air off the terrain.
+        var lim = half * 1.01, run = [];
+        function flush() {
+          if (run.length >= 4) streets.push({ w: w, p: run });
+          run = [];
+        }
+        for (var i = 0; i < line.length; i += 2) {
+          var ll = tilePtToLonLat(tile.x, tile.y, line[i], line[i + 1], S.extent, ZV);
+          var p = toLocal(ll[0], ll[1], c, k);
+          var inside = p[0] >= -lim && p[0] <= lim && p[1] >= -lim && p[1] <= lim;
+          if (inside) {
+            run.push(Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10);
+          } else {
+            // keep one step outside so the road reaches the edge, then cut
+            if (run.length) {
+              run.push(Math.max(-lim, Math.min(lim, Math.round(p[0] * 10) / 10)),
+                       Math.max(-lim, Math.min(lim, Math.round(p[1] * 10) / 10)));
+            }
+            flush();
+          }
+        }
+        flush();
+      });
+    });
+  });
+
+  // ---- terrain: composite the DEM tiles at native size, sample nearest ------
+  var terrain = null, tmin = 0, tmax = 0;
+  if (T.dem && T.dem.length) {
+    var xs = T.dem.map(function (d) { return d.x; }), ys = T.dem.map(function (d) { return d.y; });
+    var tx0 = Math.min.apply(null, xs), ty0 = Math.min.apply(null, ys);
+    var tx1 = Math.max.apply(null, xs), ty1 = Math.max.apply(null, ys);
+    var cw = (tx1 - tx0 + 1) * 256, chh = (ty1 - ty0 + 1) * 256;
+    var cv = document.createElement("canvas");
+    cv.width = cw; cv.height = chh;
+    var ctx = cv.getContext("2d", { willReadFrequently: true });
+    var pending = T.dem.length;
+    T.dem.forEach(function (d) {
+      var im = new Image();
+      im.onload = function () {
+        ctx.drawImage(im, (d.x - tx0) * 256, (d.y - ty0) * 256);
+        if (--pending === 0) finish();
+      };
+      im.onerror = function () { if (--pending === 0) finish(); };
+      im.src = "data:image/png;base64," + d.b64;
+    });
+
+    function finish() {
+      var img = ctx.getImageData(0, 0, cw, chh).data;
+      var n = Math.pow(2, ZT) * 256;
+      var g = new Array(GRID * GRID);
+      tmin = 1e9; tmax = -1e9;
+      for (var j = 0; j < GRID; j++) {
+        for (var i = 0; i < GRID; i++) {
+          var X = -half + (i / (GRID - 1)) * 2 * half;
+          var Zw = -half + (j / (GRID - 1)) * 2 * half;
+          var mx = c[0] + X / k, my = c[1] - Zw / k;
+          var lon = mx / R * 180 / Math.PI;
+          var lat = (2 * Math.atan(Math.exp(my / R)) - Math.PI / 2);
+          var wx = (lon + 180) / 360 * n;
+          var wy = (1 - Math.log(Math.tan(Math.PI / 4 + lat / 2)) / Math.PI) / 2 * n;
+          var px = Math.min(cw - 1, Math.max(0, Math.round(wx - tx0 * 256)));
+          var py = Math.min(chh - 1, Math.max(0, Math.round(wy - ty0 * 256)));
+          var o = (py * cw + px) * 4;
+          var h = img[o] * 256 + img[o + 1] + img[o + 2] / 256 - 32768;
+          h = Math.round(h);
+          g[j * GRID + i] = h;
+          if (h < tmin) tmin = h;
+          if (h > tmax) tmax = h;
+        }
+      }
+      terrain = g;
+      done(id, buildings, streets, terrain, tmin, tmax, T);
+    }
+  } else {
+    done(id, buildings, streets, null, 0, 0, T);
+  }
+}
+
+var left = Object.keys(TOWNS).length;
+function done(id, buildings, streets, terrain, tmin, tmax, T) {
+  result[id] = { size: T.size, b: buildings, s: streets, t: terrain };
+  report.push(id + ": " + buildings.length + " buildings, " + streets.length +
+              " street lines, terrain " + (terrain ? tmin + "-" + tmax + " m" : "none"));
+  if (--left === 0) {
+    var json = JSON.stringify(result);
+    report.push("json bytes " + json.length);
+    document.getElementById("out").textContent =
+      "===BEGIN===\n" + report.join("\n") + "\n===JSON===\n" + json + "\n===END===";
+  }
+}
+Object.keys(TOWNS).forEach(run);
+})();
+</script>
