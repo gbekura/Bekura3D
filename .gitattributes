@@ -11,6 +11,10 @@
 # The two that genuinely cannot survive CRLF: bash reads them.
 *.sh text eol=lf
 
+# And the one that genuinely cannot survive LF: cmd.exe reads it, and a batch
+# file with bare newlines mis-parses labels and goto.
+*.cmd text eol=crlf
+
 # Never convert and never try to diff these.
 *.png  binary
 *.jpg  binary

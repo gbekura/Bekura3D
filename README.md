@@ -18,9 +18,19 @@ Copy it to a USB stick and it works on any machine in Akhmeta, Telavi or Gurjaan
 
     git clone https://github.com/gbekura/Bekura3D.git
 
-Then open `bekura3d.html`. To pick up a newer build later:
+Then open `bekura3d.html`. To pick up a newer build later, **double-click
+`განახლება.cmd`** in the same folder. It pulls, and that is the whole update:
+the repository ships `bekura3d.html` already built, so there is nothing to
+compile. Close the page and open it again afterwards.
+
+The equivalent by hand:
 
     git pull
+
+The **განახლება** button in the app does not run that pull, and cannot. A page
+opened by double-click is a `file://` document with no shell and no filesystem;
+what the button does is tell you where the script is and print which commit the
+open page was built from, so you can see whether the pull landed.
 
 **A new build cannot overwrite a team's work.** Work lives in the browser's own
 storage, which survives replacing the page. For anything that storage cannot survive -

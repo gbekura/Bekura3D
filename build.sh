@@ -84,10 +84,22 @@ cp "$HERE/data/scan-mesh.json" "$TMP/scanmesh.json"
 if [ -f "$HERE/data/sites.json" ]; then cp "$HERE/data/sites.json" "$TMP/sites.json"; else printf "{}" > "$TMP/sites.json"; fi
 if [ -f "$HERE/data/site-scan.json" ]; then cp "$HERE/data/site-scan.json" "$TMP/sitering.json"; else printf "null" > "$TMP/sitering.json"; fi
 
+# 2b. The build stamp the განახლება panel shows, so a trainer can tell whether
+#     the pull actually landed. Taken from HEAD and never from the clock: the
+#     same commit has to rebuild to the same 13 MB file, or every rebuild would
+#     be a diff.
+BC=$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || true)
+BD=$(git -C "$HERE" log -1 --format=%cs 2>/dev/null || true)
+if [ -n "$BC" ]; then
+  printf '{"c":"%s","d":"%s"}' "$BC" "$BD" > "$TMP/build.json"
+else
+  printf 'null' > "$TMP/build.json"          # built outside a checkout
+fi
+
 # 3. splice everything into the page. The __DATA__ marker sits on its own
 #    line below a bare "{}" placeholder, so replacing that whole line is safe.
 awk -v gfile="$TMP/grounds.js" -v tfile="$TMP/three.js" -v bfile="$TMP/buildings.json" \
-    -v afile="$TMP/sats.js" \
+    -v afile="$TMP/sats.js" -v vfile="$TMP/build.json" \
     -v ffile="$TMP/fonts.css" -v sfile="$TMP/scanmesh.json" -v rfile="$TMP/sitering.json" -v dfile="$TMP/sites.json" '
   /^<script src="lib\/three\.min\.js"><\/script>$/ {
     print "<script>"
@@ -118,6 +130,13 @@ awk -v gfile="$TMP/grounds.js" -v tfile="$TMP/three.js" -v bfile="$TMP/buildings
   /\/\*__SITERING__\*\// {
     printf "var SITERING = "
     if ((getline line < rfile) > 0) printf "%s", line
+    else printf "null"
+    print ";"
+    next
+  }
+  /\/\*__BUILD__\*\// {
+    printf "var BUILD = "
+    if ((getline line < vfile) > 0) printf "%s", line
     else printf "null"
     print ";"
     next

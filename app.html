@@ -219,6 +219,26 @@
   footer .credit a:hover{color:rgba(255,255,255,.82);border-bottom-color:rgba(255,255,255,.45)}
   footer .credit a:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
   kbd{background:rgba(255,255,255,.12);border-radius:4px;padding:1px 6px;font-family:var(--ka);font-size:11.5px}
+
+  /* The update panel. A file:// page has no shell, so this cannot run the pull
+     itself; it says where to click and which build is on screen. */
+  #updwrap{position:fixed;inset:0;z-index:60;display:none;place-items:center;
+        background:rgba(8,14,26,.72)}
+  #updwrap.on{display:grid}
+  #upd{width:min(620px,92vw);background:var(--navy);border:1px solid rgba(255,255,255,.18);
+        border-radius:14px;padding:26px 28px 22px;box-shadow:0 26px 70px rgba(0,0,0,.6)}
+  #upd h3{font-size:11px;letter-spacing:1.6px;color:rgba(255,255,255,.45);
+        text-transform:uppercase;margin:0 0 14px}
+  #upd p{font-size:14.5px;line-height:1.55;color:rgba(255,255,255,.82);margin:0 0 12px}
+  #upd p.small{font-size:13px;color:rgba(255,255,255,.55)}
+  #upd .path{display:flex;align-items:center;gap:8px;margin:14px 0}
+  #upd code{flex:1;min-width:0;background:rgba(255,255,255,.07);
+        border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:9px 11px;
+        font-family:Consolas,monospace;font-size:12.5px;color:#CFE6E8;
+        overflow-x:auto;white-space:nowrap}
+  #upd .stamp{border-top:1px solid rgba(255,255,255,.12);margin-top:16px;padding-top:12px;
+        font-size:12.5px;color:rgba(255,255,255,.5)}
+  #upd .stamp b{color:var(--cyan);font-family:Consolas,monospace}
 </style>
 </head>
 <body>
@@ -258,6 +278,7 @@
     <button class="ghost" id="open">გახსნა</button>
     <input type="file" id="openf" accept=".json,application/json" style="display:none">
     <button class="ghost" id="datafile" title="ყველა ქალაქი და ყველა მოდელი ერთ ფაილში, პროგრამის გვერდით დასადებად">მონაცემები</button>
+    <button class="ghost" id="updbtn" title="როგორ განაახლო პროგრამა">განახლება</button>
     <button class="ghost" id="clear">გასუფთავება</button>
   </header>
 
@@ -332,6 +353,19 @@
     </section>
    </div>
   </div>
+
+  <div id="updwrap"><div id="upd">
+    <h3>ᲒᲐᲜᲐᲮᲚᲔᲑᲐ</h3>
+    <p>ეს გვერდი ბრაუზერშია და ბრძანებას თვითონ ვერ გაუშვებს. განახლება ერთი
+       ორმაგი დაწკაპუნებაა: პროგრამის საქაღალდეში დევს ფაილი
+       <b>განახლება.cmd</b>.</p>
+    <div class="path"><code id="updpath">—</code>
+      <button class="mini" id="updcopy" style="flex:none;padding:8px 14px">კოპირება</button></div>
+    <p class="small">ის ჩამოტვირთავს ახალ ვერსიას და თავიდან ააწყობს ამ ფაილს.
+       მერე გვერდი დახურე და ისევ გახსენი. შენახული ნამუშევარი ადგილზე რჩება.</p>
+    <div class="stamp" id="updstamp"></div>
+    <button class="mini" id="updclose" style="width:100%;margin-top:16px">დახურვა</button>
+  </div></div>
 
   <footer>
     <span id="hint"></span>
@@ -557,6 +591,10 @@ var SCANMESH = null; /*__SCANMESH__*/
 
 // The working area drawn over the scan in Blender, exported by data/make-site.py.
 var SITERING = null; /*__SITERING__*/
+// Which commit this bundle was built from. A pure function of HEAD, never the
+// clock, so rebuilding without a new commit still reproduces the file byte for
+// byte. Null when built outside a checkout.
+var BUILD = null; /*__BUILD__*/
 
 // Working areas that SHIP with the tool, one ring per town, from data/sites.json.
 // A trainer draws the district once with the ტერიტორია tool, the ring is baked
@@ -2637,6 +2675,52 @@ document.getElementById("town").addEventListener("change", function () {
 document.getElementById("recenter").addEventListener("click", recenter);
 document.getElementById("masswhitebtn").addEventListener("click", function () { setTool("masswhite"); });
 document.getElementById("humanbtn").addEventListener("click", toggleHuman);
+
+// ---------------------------------------------------------------- update
+// A page opened by double-click is a file:// document: no shell, no File System
+// Access API, no way to run git. What it can do is say exactly where the script
+// is and which build is on screen, so a trainer can tell whether the pull took.
+function updFolder() {
+  if (location.protocol !== "file:") return null;
+  var p = decodeURIComponent(location.pathname).replace(/\/[^/]*$/, "");
+  p = p.replace(/^\//, "").replace(/\//g, "\\");
+  return p || null;
+}
+function showUpdate() {
+  var dir = updFolder();
+  var cmd = dir ? dir + "\\განახლება.cmd"
+                : "git pull  &&  bash build.sh";
+  document.getElementById("updpath").textContent = cmd;
+  document.getElementById("updstamp").innerHTML = BUILD
+    ? "ახლა გიდევს <b>" + BUILD.c + "</b> · " + BUILD.d
+    : "ეს ბილდი რეპოზიტორიის გარეთაა აწყობილი, ვერსიას ვერ გეტყვი.";
+  document.getElementById("updwrap").classList.add("on");
+}
+document.getElementById("updbtn").addEventListener("click", showUpdate);
+document.getElementById("updclose").addEventListener("click", function () {
+  document.getElementById("updwrap").classList.remove("on");
+});
+document.getElementById("updwrap").addEventListener("click", function (ev) {
+  if (ev.target === this) this.classList.remove("on");
+});
+document.getElementById("updcopy").addEventListener("click", function () {
+  var txt = document.getElementById("updpath").textContent, b = this;
+  function done() { b.textContent = "დაკოპირდა"; setTimeout(function () {
+    b.textContent = "კოპირება"; }, 1400); }
+  // clipboard.writeText can be refused on an opaque file:// origin
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done, fallback);
+  } else fallback();
+  function fallback() {
+    var ta = document.createElement("textarea");
+    ta.value = txt;
+    ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); done(); } catch (e) { /* nothing else to try */ }
+    document.body.removeChild(ta);
+  }
+});
 document.getElementById("gnd-map").addEventListener("click", function () { setGround("map"); });
 document.getElementById("gnd-sat").addEventListener("click", function () { setGround("sat"); });
 document.getElementById("gnd-white").addEventListener("click", function () { setGround("white"); });
