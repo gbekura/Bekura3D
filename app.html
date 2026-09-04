@@ -767,7 +767,7 @@ function hasSat(id) { return !!SATS[id]; }
 function useSat(id) { return state.ground === "sat" && !!SATS[id]; }
 function groundKey(id) { return useSat(id) ? id + ":sat" : id; }
 function groundURL(id) {
-  return useSat(id) ? SATS[id] : (GROUNDS[id] || ("ground/" + id + ".png"));
+  return useSat(id) ? SATS[id] : (GROUNDS[id] || ("ground/" + id + ".jpg"));
 }
 
 function applyGround(id) {

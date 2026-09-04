@@ -775,7 +775,7 @@ function hasSat(id) { return !!SATS[id]; }
 function useSat(id) { return state.ground === "sat" && !!SATS[id]; }
 function groundKey(id) { return useSat(id) ? id + ":sat" : id; }
 function groundURL(id) {
-  return useSat(id) ? SATS[id] : (GROUNDS[id] || ("ground/" + id + ".png"));
+  return useSat(id) ? SATS[id] : (GROUNDS[id] || ("ground/" + id + ".jpg"));
 }
 
 function applyGround(id) {
@@ -845,7 +845,7 @@ var SITERING = null;
 // Which commit this bundle was built from. A pure function of HEAD, never the
 // clock, so rebuilding without a new commit still reproduces the file byte for
 // byte. Null when built outside a checkout.
-var BUILD = {"c":"f058ffd","d":"2026-09-04"};
+var BUILD = {"c":"307d511","d":"2026-09-04"};
 
 // Working areas that SHIP with the tool, one ring per town, from data/sites.json.
 // A trainer draws the district once with the ტერიტორია tool, the ring is baked
