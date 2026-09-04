@@ -857,7 +857,7 @@ function ribbonOnTerrain(ring, W) {
   for (var e = 0; e < ring.length; e++) {
     var a = ring[e], b = ring[(e + 1) % ring.length];
     var seg = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    var n = Math.max(1, Math.round(seg / 20));          // resample so it hugs the ground
+    var n = Math.max(1, Math.round(seg / 10));          // finer than the 14 m heightfield
     for (var i = 0; i < n; i++) {
       var t0 = i / n, t1 = (i + 1) / n;
       var x0 = a[0] + (b[0] - a[0]) * t0, z0 = a[1] + (b[1] - a[1]) * t0;
@@ -943,14 +943,15 @@ function buildSite(town) {
   siteMesh.visible = state.siteOn;
   scene.add(siteMesh);
 
-  // The ground stack, in metres over the terrain: streets 0.5, this sheet 0.7,
-  // zoning areas 0.9, the red line 1.2. So the sheet blanks the map and the
-  // street lines printed on it, and the plan and the brief stay over the top —
-  // by height, at every camera distance, rather than by a polygon offset that is
-  // worth 2 cm up close and 34 cm from a kilometre out.
+  // The ground stack, in metres over the terrain: this sheet 0.2, streets 0.5,
+  // zoning areas and paths 0.9, the red line 1.2. The sheet is the bottom of it
+  // because it blanks the map — the drawing on the ground — and nothing else.
+  // The existing town on top of it, streets included, is what შენობები is for.
+  // It sits low so that a street crossing a slope, which is flat across its own
+  // width, still has room to stay above it.
   // 10 m triangles: finer than the 14 m heightfield, so the sheet follows the
   // ground instead of cutting down through it.
-  var wg = drapedFill(ring, 0.7, 10);
+  var wg = drapedFill(ring, 0.2, 10);
   if (wg) {
     siteWhite = new THREE.Mesh(wg, siteWhiteMat);
     siteWhite.renderOrder = 2;                 // over the ground, under the line
@@ -1097,9 +1098,13 @@ function ribbonInto(pos, nor, pts, width, lift, step) {
     var len = Math.sqrt(dx * dx + dz * dz);
     if (len < 0.001) continue;
     var nx = -dz / len * hw, nz = dx / len * hw;
-    var ay = terrainAt(a[0], a[1]) + lift, by = terrainAt(b[0], b[1]) + lift;
-    var p1 = [a[0] + nx, ay, a[1] + nz], p2 = [b[0] + nx, by, b[1] + nz];
-    var p3 = [b[0] - nx, by, b[1] - nz], p4 = [a[0] - nx, ay, a[1] - nz];
+    // Each corner takes the ground under itself. Using the centreline height for
+    // the full width, as this did, tips a 15 m road into the hill it crosses:
+    // the uphill edge ends up under the terrain and the downhill edge in the air.
+    var p1 = [a[0] + nx, terrainAt(a[0] + nx, a[1] + nz) + lift, a[1] + nz];
+    var p2 = [b[0] + nx, terrainAt(b[0] + nx, b[1] + nz) + lift, b[1] + nz];
+    var p3 = [b[0] - nx, terrainAt(b[0] - nx, b[1] - nz) + lift, b[1] - nz];
+    var p4 = [a[0] - nx, terrainAt(a[0] - nx, a[1] - nz) + lift, a[1] - nz];
     pos.push(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2]);
     pos.push(p1[0], p1[1], p1[2], p3[0], p3[1], p3[2], p4[0], p4[1], p4[2]);
     for (var k = 0; k < 6; k++) nor.push(0, 1, 0);
@@ -1111,7 +1116,9 @@ function buildRoads(list) {
   for (var i = 0; i < list.length; i++) {
     var st = list[i], pts = [];
     for (var j = 0; j < st.p.length; j += 2) pts.push([st.p[j], st.p[j + 1]]);
-    ribbonInto(pos, nor, pts, st.w, 0.5, 25);
+    // 10 m, not 25: the heightfield is sampled every 14, so a longer step
+    // bridges a dip and lifts the street off the ground it is drawn on.
+    ribbonInto(pos, nor, pts, st.w, 0.5, 10);
   }
   var g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
@@ -1258,7 +1265,7 @@ function makeShapeMesh(it) {
 function makePathMesh(it) {
   if (it.pts.length < 2) return null;
   var pos = [], nor = [];
-  ribbonInto(pos, nor, it.pts, it.width, 0.9, 20);   // draped over the terrain
+  ribbonInto(pos, nor, it.pts, it.width, 0.9, 10);   // draped over the terrain
   if (!pos.length) return null;
   var g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
@@ -5783,6 +5790,7 @@ if (/[?&]debug=1/.test(location.search)) {
                       undo: undo, redo: redo, useDoc: useDoc, hist: hist,
                       schSubtract: schSubtract, schRebuild: schRebuild, schItems: schItems,
                       setTab: setTab, SClight: SC.light, applyLighting: applyLighting,
+                      terrainAt: terrainAt, siteRing: siteRing,
                       objRoot: objRoot, items: items, rebuild: rebuild, scene: scene };
 }
 
@@ -6044,15 +6052,15 @@ if (/[?&]selftest=1/.test(location.search)) {
   want("the sheet lies under the red line",
        (siteWhite && siteWhite.renderOrder < siteMesh.renderOrder) ? "yes" : "no", "yes");
   var _wp = siteWhite.geometry.getAttribute("position");
-  want("and 0.7 m up: over the streets at 0.5, under the zoning at 0.9",
-       (_wp.getY(0) - terrainAt(_wp.getX(0), _wp.getZ(0))).toFixed(2), "0.70");
+  want("and 0.2 m up: under the streets at 0.5 and the zoning at 0.9",
+       (_wp.getY(0) - terrainAt(_wp.getX(0), _wp.getZ(0))).toFixed(2), "0.20");
   // every vertex sits on the ground, and the triangles between them are short
   // enough that the surface does not sag through it
   var _sag = 0, _long = 0;
   for (var _i = 0; _i < _wp.count; _i += 3) {
     for (var _k = 0; _k < 3; _k++) {
       var _vx = _wp.getX(_i + _k), _vz = _wp.getZ(_i + _k);
-      _sag = Math.max(_sag, Math.abs(_wp.getY(_i + _k) - terrainAt(_vx, _vz) - 0.7));
+      _sag = Math.max(_sag, Math.abs(_wp.getY(_i + _k) - terrainAt(_vx, _vz) - 0.2));
     }
     for (var _e = 0; _e < 3; _e++) {
       var _j = _i + _e, _n = _i + (_e + 1) % 3;
@@ -6082,6 +6090,36 @@ if (/[?&]selftest=1/.test(location.search)) {
   // and the working area really is a fraction of the map it sits on
   want("which is a good deal smaller than the town",
        (_bb.max.x - _bb.min.x) < townSize(state.town) * 0.6 ? "yes" : "no", "yes");
+
+  // The streets sit 20 cm over the sheet at their own samples. What matters is
+  // the span between those samples: a segment long enough to bridge a dip in the
+  // ground rides above it, and fragments of street come up through the sheet.
+  if (roadMesh) {
+    var _sp = roadMesh.geometry.getAttribute("position"), _dip = 9e9;
+    for (var _v = 0; _v < _sp.count; _v += 3) {
+      for (var _e2 = 0; _e2 < 3; _e2++) {
+        var _i1 = _v + _e2, _i2 = _v + (_e2 + 1) % 3;
+        var _mx = (_sp.getX(_i1) + _sp.getX(_i2)) / 2;
+        var _mz = (_sp.getZ(_i1) + _sp.getZ(_i2)) / 2;
+        var _my = (_sp.getY(_i1) + _sp.getY(_i2)) / 2;
+        _dip = Math.min(_dip, _my - (terrainAt(_mx, _mz) + 0.2));
+      }
+    }
+    want("no street sags into the sheet, across its width or along it",
+         _dip > 0.05 ? "yes" : "no", "yes");
+  }
+
+  // The red line is draped the same way, over the top of all of it.
+  var _rp = siteMesh.geometry.getAttribute("position"), _rlong = 0;
+  for (var _t = 0; _t < _rp.count; _t += 3) {
+    for (var _u = 0; _u < 3; _u++) {
+      var _a1 = _t + _u, _b1 = _t + (_u + 1) % 3;
+      _rlong = Math.max(_rlong, Math.hypot(_rp.getX(_a1) - _rp.getX(_b1),
+                                           _rp.getZ(_a1) - _rp.getZ(_b1)));
+    }
+  }
+  want("the boundary is resampled as finely as what it sits over",
+       _rlong <= 12 ? "yes" : "no", "yes");
 
   // A zoning area is draped the same way and has to clear the sheet across its
   // whole span, not only at its corners.
