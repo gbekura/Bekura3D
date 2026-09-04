@@ -320,12 +320,17 @@ arithmetic, so the two register by construction rather than by eye and a zone dr
 sits on the same roofs on the other. `make-maps.sh map` or `make-maps.sh sat telavi` narrows
 it. The satellite pass is optional: without `ground/*-sat.jpg` the app hides the სატელიტი
 button and leaves რუკა on its own. **თეთრი ფონი** is a separate switch, not a third
-map: it lays a blank white sheet **inside the red working-area boundary and nowhere else**,
-so the map outside the line is untouched and the site becomes a clean surface to plan on.
-The sheet is built from the ring the red line is built from, so the two edges are the same
-edge. The ground stack, in metres over the terrain: streets 0.5, the sheet 0.7, zoning areas
-0.9, the red line 1.2 - the sheet covers the map and the street lines printed on it, and the
-brief and the plan stay legible over the top. Switch it off and the map inside comes back.
+map: it blanks the map **inside the red working-area boundary and nowhere else**, so the map
+outside the line is untouched and the site becomes a clean surface to plan on. Switch it off
+and the map inside comes back.
+
+It works by painting the ground white in the ground's own shader, testing each fragment
+against the working-area ring, rather than by laying a white surface over the ground. That is
+not a detail: a street ribbon is flat across its own width, so where the terrain ridges under
+one the road clears the ground by about a centimetre. Anything slipped into that gap comes
+back through the street in fragments whatever height it is given. Painting the ground has
+nothing to compete with, and the streets, the zoning and the red line stay exactly where they
+have always been.
 
 ## Keeping work when you ship a new build
 

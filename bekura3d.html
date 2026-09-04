@@ -558,6 +558,67 @@ sun.shadow.bias = -0.0006;
 scene.add(sun);
 
 var groundMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+
+// ---------------------------------------------------------------- white-out
+// თეთრი ფონი blanks the map inside the working area, and it does it by painting
+// the ground in the ground's own shader rather than by laying a white surface
+// over it. A surface cannot be made to work here: a street ribbon is flat across
+// its width, so where the terrain ridges under one the road clears the ground by
+// about a centimetre, and anything slipped into that gap surfaces through the
+// street in fragments no matter what height it is given. The ground has nothing
+// to compete with — the streets, the zoning and the red line all stay where they
+// have always been, and there is one surface where there was one before.
+var WOMAX = 64;                       // ring corners the shader can carry
+var WO = {
+  on:   { value: 0 },
+  n:    { value: 0 },
+  poly: { value: (function () {
+            var a = [];               // one spare: the ring is stored closed
+            for (var i = 0; i <= WOMAX; i++) a.push(new THREE.Vector2());
+            return a;
+          })() }
+};
+
+groundMat.onBeforeCompile = function (sh) {
+  sh.uniforms.woOn = WO.on;
+  sh.uniforms.woN = WO.n;
+  sh.uniforms.woPoly = WO.poly;
+  sh.vertexShader = "varying vec2 vGround;\n" + sh.vertexShader.replace(
+    "#include <begin_vertex>",
+    "#include <begin_vertex>\n  vGround = (modelMatrix * vec4(position, 1.0)).xz;");
+  // The crossing test, walked edge by edge. Storing the ring closed — poly[n]
+  // repeats poly[0] — means both subscripts are the loop counter, which keeps
+  // this legal on WebGL 1 as well, where an array index has to be one.
+  sh.fragmentShader =
+    "varying vec2 vGround;\nuniform int woOn;\nuniform int woN;\n" +
+    "uniform vec2 woPoly[" + (WOMAX + 1) + "];\n" +
+    sh.fragmentShader.replace(
+      "#include <color_fragment>",
+      "#include <color_fragment>\n" +
+      "  if (woOn == 1) {\n" +
+      "    bool ins = false;\n" +
+      "    for (int i = 0; i < " + WOMAX + "; i++) {\n" +
+      "      if (i >= woN) break;\n" +
+      "      vec2 pa = woPoly[i], pb = woPoly[i + 1];\n" +
+      "      if (((pa.y > vGround.y) != (pb.y > vGround.y)) &&\n" +
+      "          (vGround.x < (pb.x - pa.x) * (vGround.y - pa.y) / (pb.y - pa.y) + pa.x))\n" +
+      "        ins = !ins;\n" +
+      "    }\n" +
+      "    if (ins) diffuseColor.rgb = vec3(1.0);\n" +
+      "  }");
+};
+
+// Hand the shader the ring it should paint inside, in world x and z.
+function syncWhiteOut() {
+  var ring = state.mapWhite ? siteRing(state.town) : null;
+  if (!ring || ring.length < 3 || ring.length > WOMAX) {
+    WO.on.value = 0; WO.n.value = 0; return;
+  }
+  for (var i = 0; i < ring.length; i++) WO.poly.value[i].set(ring[i][0], ring[i][1]);
+  WO.poly.value[ring.length].copy(WO.poly.value[0]);
+  WO.n.value = ring.length;
+  WO.on.value = 1;
+}
 var ground = null;              // terrain mesh, rebuilt per town
 
 var objRoot = new THREE.Group();
@@ -630,7 +691,7 @@ function setGround(which) {
 // touched, and რუკა and სატელიტი stay a straight two-way choice.
 function toggleMapWhite() {
   state.mapWhite = !state.mapWhite;
-  if (siteWhite) siteWhite.visible = state.mapWhite;
+  syncWhiteOut();
   syncViewBtns();
   save();
 }
@@ -661,7 +722,7 @@ var SITERING = null;
 // Which commit this bundle was built from. A pure function of HEAD, never the
 // clock, so rebuilding without a new commit still reproduces the file byte for
 // byte. Null when built outside a checkout.
-var BUILD = {"c":"ca2e7c1","d":"2026-09-04"};
+var BUILD = {"c":"3a186cc","d":"2026-09-04"};
 
 // Working areas that SHIP with the tool, one ring per town, from data/sites.json.
 // A trainer draws the district once with the ტერიტორია tool, the ring is baked
@@ -928,44 +989,15 @@ function siteRing(town) {
   return [[s.cx - h, s.cz - h], [s.cx + h, s.cz - h], [s.cx + h, s.cz + h], [s.cx - h, s.cz + h]];
 }
 
-// The blank sheet თეთრი ფონი switches on. Unlit white on purpose: the point is
-// a clean surface to draw a plan over, and a lit one would go grey the moment
-// somebody drops the sun. It is built from the same ring as the red line and
-// draped the same way, so the two edges are the same edge.
-var siteWhite = null;
-var siteWhiteMat = new THREE.MeshBasicMaterial({
-  color: 0xffffff, side: THREE.DoubleSide,
-  // The same bias the zoning fills carry, for the same reason: a surface laid a
-  // few centimetres over the ground has to win the depth test at 1,7 km out,
-  // where one depth-buffer step is worth about 17 cm.
-  polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2
-});
-
 function buildSite(town) {
   if (siteMesh) { scene.remove(siteMesh); siteMesh.geometry.dispose(); siteMesh = null; }
-  if (siteWhite) { scene.remove(siteWhite); siteWhite.geometry.dispose(); siteWhite = null; }
+  syncWhiteOut();                    // the ring may have moved, or the town changed
   var ring = siteRing(town);
   if (!ring || ring.length < 3) return;
   siteMesh = new THREE.Mesh(ribbonOnTerrain(ring, 4), siteMat);
   siteMesh.renderOrder = 3;                    // over the ground and the roads
   siteMesh.visible = state.siteOn;
   scene.add(siteMesh);
-
-  // The ground stack, in metres over the terrain: this sheet 0.2, streets 0.5,
-  // zoning areas and paths 0.9, the red line 1.2. The sheet is the bottom of it
-  // because it blanks the map — the drawing on the ground — and nothing else.
-  // The existing town on top of it, streets included, is what შენობები is for.
-  // It sits low so that a street crossing a slope, which is flat across its own
-  // width, still has room to stay above it.
-  // 10 m triangles: finer than the 14 m heightfield, so the sheet follows the
-  // ground instead of cutting down through it.
-  var wg = drapedFill(ring, 0.2, 10);
-  if (wg) {
-    siteWhite = new THREE.Mesh(wg, siteWhiteMat);
-    siteWhite.renderOrder = 2;                 // over the ground, under the line
-    siteWhite.visible = !!state.mapWhite;
-    scene.add(siteWhite);
-  }
 }
 
 // The red line is a brief, not a drawing: it has to be possible to look at the
@@ -6044,80 +6076,51 @@ if (/[?&]selftest=1/.test(location.search)) {
 
   SC.light = savedL; SC.env = savedEnv; applyLighting();
 
-  // ---- the white sheet ----------------------------------------------------
-  // It blanks the working area and nothing else: the map outside the red line
-  // is untouched, and the line still draws over the top of the sheet.
+  // ---- the white-out ------------------------------------------------------
+  // It blanks the map inside the working area and nothing else, by painting the
+  // ground rather than by covering it.
   var _g0 = state.ground, _w0 = state.mapWhite;
-  state.mapWhite = false;
-  // Comparing the texture to itself, not to null: the map loads asynchronously
-  // and may not have arrived yet this early. What matters is that the sheet
-  // never touches it either way.
-  var _m0 = groundMat.map;
+  var _m0 = groundMat.map;        // the texture loads late; compare it to itself
+  state.mapWhite = false; syncWhiteOut();
+  want("the ground starts unpainted", WO.on.value, 0);
   toggleMapWhite();
-  want("თეთრი switches a sheet on", (siteWhite && siteWhite.visible) ? "yes" : "no", "yes");
-  want("and leaves the map under it exactly as it was",
-       groundMat.map === _m0 ? "same" : "changed", "same");
-  want("the sheet lies under the red line",
-       (siteWhite && siteWhite.renderOrder < siteMesh.renderOrder) ? "yes" : "no", "yes");
-  var _wp = siteWhite.geometry.getAttribute("position");
-  want("and 0.2 m up: under the streets at 0.5 and the zoning at 0.9",
-       (_wp.getY(0) - terrainAt(_wp.getX(0), _wp.getZ(0))).toFixed(2), "0.20");
-  // every vertex sits on the ground, and the triangles between them are short
-  // enough that the surface does not sag through it
-  var _sag = 0, _long = 0;
-  for (var _i = 0; _i < _wp.count; _i += 3) {
-    for (var _k = 0; _k < 3; _k++) {
-      var _vx = _wp.getX(_i + _k), _vz = _wp.getZ(_i + _k);
-      _sag = Math.max(_sag, Math.abs(_wp.getY(_i + _k) - terrainAt(_vx, _vz) - 0.2));
-    }
-    for (var _e = 0; _e < 3; _e++) {
-      var _j = _i + _e, _n = _i + (_e + 1) % 3;
-      _long = Math.max(_long, Math.hypot(_wp.getX(_j) - _wp.getX(_n),
-                                         _wp.getZ(_j) - _wp.getZ(_n)));
-    }
-  }
-  want("every corner of the sheet is on the ground", _sag < 1e-3 ? "yes" : "no", "yes");
-  // Asking for 10 m; a handful of slivers bottom out on the recursion cap a
-  // little above that. What matters is that none of them spans two cells of the
-  // heightfield, which is where a flat triangle starts sagging through it.
-  want("and no triangle spans two cells of the heightfield",
-       _long <= 16 ? "yes" : "no", "yes");
-
-  // the sheet has to stop where the boundary stops — not at the edge of town
+  want("თეთრი paints the ground white", WO.on.value, 1);
   var _ring = siteRing(state.town);
-  var _rx = _ring.map(function (p) { return p[0]; });
-  var _rz = _ring.map(function (p) { return p[1]; });
-  siteWhite.geometry.computeBoundingBox();
-  var _bb = siteWhite.geometry.boundingBox;
-  want("it stops where the boundary stops, on x",
-       (Math.abs(_bb.min.x - Math.min.apply(null, _rx)) < 1 &&
-        Math.abs(_bb.max.x - Math.max.apply(null, _rx)) < 1) ? "yes" : "no", "yes");
-  want("and on z",
-       (Math.abs(_bb.min.z - Math.min.apply(null, _rz)) < 1 &&
-        Math.abs(_bb.max.z - Math.max.apply(null, _rz)) < 1) ? "yes" : "no", "yes");
-  // and the working area really is a fraction of the map it sits on
-  want("which is a good deal smaller than the town",
-       (_bb.max.x - _bb.min.x) < townSize(state.town) * 0.6 ? "yes" : "no", "yes");
+  want("inside the working area's own outline", WO.n.value, _ring.length);
+  want("starting at the boundary's first corner",
+       WO.poly.value[0].x.toFixed(1) + "," + WO.poly.value[0].y.toFixed(1),
+       _ring[0][0].toFixed(1) + "," + _ring[0][1].toFixed(1));
+  want("with the ring closed, so the shader can walk it edge by edge",
+       (WO.poly.value[_ring.length].x === WO.poly.value[0].x &&
+        WO.poly.value[_ring.length].y === WO.poly.value[0].y) ? "yes" : "no", "yes");
+  want("and the map itself is never taken away",
+       groundMat.map === _m0 ? "same" : "changed", "same");
+  want("the working area is a fraction of the town it sits in",
+       (Math.max.apply(null, _ring.map(function (p) { return p[0]; })) -
+        Math.min.apply(null, _ring.map(function (p) { return p[0]; })))
+         < townSize(state.town) * 0.6 ? "yes" : "no", "yes");
 
-  // The streets sit 20 cm over the sheet at their own samples. What matters is
-  // the span between those samples: a segment long enough to bridge a dip in the
-  // ground rides above it, and fragments of street come up through the sheet.
+  // Why there is no surface any more: a street ribbon is flat across its width,
+  // so where the ground ridges under one it is all but buried in its own terrain.
   if (roadMesh) {
-    var _sp = roadMesh.geometry.getAttribute("position"), _dip = 9e9;
+    var _sp = roadMesh.geometry.getAttribute("position"), _corner = 9e9, _mid = 9e9;
     for (var _v = 0; _v < _sp.count; _v += 3) {
       for (var _e2 = 0; _e2 < 3; _e2++) {
         var _i1 = _v + _e2, _i2 = _v + (_e2 + 1) % 3;
-        var _mx = (_sp.getX(_i1) + _sp.getX(_i2)) / 2;
-        var _mz = (_sp.getZ(_i1) + _sp.getZ(_i2)) / 2;
-        var _my = (_sp.getY(_i1) + _sp.getY(_i2)) / 2;
-        _dip = Math.min(_dip, _my - (terrainAt(_mx, _mz) + 0.2));
+        _corner = Math.min(_corner, _sp.getY(_i1) - terrainAt(_sp.getX(_i1), _sp.getZ(_i1)));
+        _mid = Math.min(_mid,
+          (_sp.getY(_i1) + _sp.getY(_i2)) / 2 -
+          terrainAt((_sp.getX(_i1) + _sp.getX(_i2)) / 2,
+                    (_sp.getZ(_i1) + _sp.getZ(_i2)) / 2));
       }
     }
-    want("no street sags into the sheet, across its width or along it",
-         _dip > 0.05 ? "yes" : "no", "yes");
+    want("every street corner takes the ground under itself, not the centreline",
+         _corner.toFixed(2), "0.50");
+    want("and between corners a street can still be centimetres off the ground",
+         _mid < 0.1 ? "yes" : "no", "yes");
   }
 
-  // The red line is draped the same way, over the top of all of it.
+  // The red line is draped over the top of all of it.
   var _rp = siteMesh.geometry.getAttribute("position"), _rlong = 0;
   for (var _t = 0; _t < _rp.count; _t += 3) {
     for (var _u = 0; _u < 3; _u++) {
@@ -6129,7 +6132,7 @@ if (/[?&]selftest=1/.test(location.search)) {
   want("the boundary is resampled as finely as what it sits over",
        _rlong <= 12 ? "yes" : "no", "yes");
 
-  // A zoning area is draped the same way and has to clear the sheet across its
+  // A zoning area is draped on the same ground and has to hug it across its
   // whole span, not only at its corners.
   var _ac = siteRing(state.town)[0];
   var _am = makeAreaMesh({ id: -1, kind: "area", type: "learn",
@@ -6145,19 +6148,19 @@ if (/[?&]selftest=1/.test(location.search)) {
       _alift = Math.min(_alift, _ap.getY(_j2) - terrainAt(_ap.getX(_j2), _ap.getZ(_j2)));
     }
   }
-  want("a zoning area floats 0.2 m over the sheet", _alift.toFixed(2), "0.90");
-  want("and is cut as fine as the sheet under it", _aedge <= 16 ? "yes" : "no", "yes");
+  want("a zoning area sits 0.9 m over the ground", _alift.toFixed(2), "0.90");
+  want("cut fine enough to follow it", _aedge <= 16 ? "yes" : "no", "yes");
   _am.geometry.dispose();
 
   toggleMapWhite();
-  want("switching it off takes the sheet away", siteWhite.visible ? "on" : "off", "off");
+  want("switching it off puts the map back", WO.on.value, 0);
   want("and never touched the map choice", state.ground, _g0);
   state.ground = "sat"; state.mapWhite = false;
   adoptGround("white");
   want("a save from when თეთრი was a ground opens as the switch",
        state.mapWhite + "/" + state.ground, "true/sat");
   state.ground = _g0; state.mapWhite = _w0;
-  if (siteWhite) siteWhite.visible = state.mapWhite;
+  syncWhiteOut();
   applyGround(state.town);
 
   // ---- inset --------------------------------------------------------------
