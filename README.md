@@ -160,7 +160,9 @@ trade to revisit if the classroom machines turn out to have room for it.
   The **sky follows the sun**, a gradient dome that warms at the horizon and cools overhead
   as the sun drops, with a glow around the sun itself. Two sky modes: **ბუნებრივი** (natural
   daylight colour) and **თეთრი** (a flat white studio backdrop). Dim the sun to 0 and raise
-  the sky, and the scene is lit by ambient alone with no shadows.
+  the sky, and the scene is lit by ambient alone with no shadows. **ქალაქი carries the same
+  panel**, driving its own sun and its own dome over the town: turn მზის მხარე and the
+  streets tell you which side of them is in shade at four o'clock.
 - **Navigation box** faces are **compass-named**, აღმ / დას / ჩრდ / სამხ / ზედ / ქვე -
   because the site has a real north and the brief asks students to reason about sun and noise
   by direction.
@@ -317,7 +319,10 @@ the aerial photo under it, at 2048 px per town. Both extents come from the same 
 arithmetic, so the two register by construction rather than by eye and a zone drawn on one
 sits on the same roofs on the other. `make-maps.sh map` or `make-maps.sh sat telavi` narrows
 it. The satellite pass is optional: without `ground/*-sat.jpg` the app hides the სატელიტი
-button and keeps რუკა and თეთრი.
+button and leaves რუკა on its own. **თეთრი ფონი** is a separate switch, not a third
+map, so it works either way: it takes the map off the ground and leaves the red boundary,
+the streets, the zoning and the masses drawn over it. Switch it off and the რუკა or
+სატელიტი you were on comes back.
 
 ## Keeping work when you ship a new build
 

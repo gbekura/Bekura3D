@@ -370,7 +370,10 @@
      <div class="seg" id="groundseg">
        <button id="gnd-map" class="on" title="ნახაზი: ქუჩების სახელები, ნაკვეთები, საზღვრები">რუკა</button>
        <button id="gnd-sat" title="აეროფოტო: რა დგას მიწაზე სინამდვილეში">სატელიტი</button>
-       <button id="gnd-white" title="სუფთა თეთრი: ძველი რუკა აღარ ჩანს, მხოლოდ შენი გეგმა">თეთრი</button>
+     </div>
+     <div class="vrow" id="whiterow" style="margin-top:7px">
+       <button class="vbtn" id="whitebtn" title="თეთრი ფურცელი რუკის ნაცვლად. წითელი საზღვარი, ქუჩები და შენი გეგმა თავზე რჩება">
+         <span class="vi">▢</span>თეთრი ფონი</button>
      </div>
    </section>
    <div id="sideSchool" style="display:none"></div>
@@ -501,7 +504,8 @@ var state = {
   massWhite: false, // masses in white instead of the zone colour
   selPt: null,      // index of the selected corner of the selected zoning area
   siteOn: true,     // the red working-area boundary
-  ground: "map",    // map | sat | white — what is painted on the terrain
+  ground: "map",    // map | sat — which map is painted on the terrain
+  mapWhite: false,  // and whether a plain white sheet is laid over it
   cgiz: "move",     // which transform the city gizmo is showing
   // Same numbers the school studio uses, kept as separate state because the
   // two halves work at different scales and a shared toggle would surprise.
@@ -583,9 +587,11 @@ function groundURL(id) {
 }
 
 function applyGround(id) {
-  // Blank white is the absence of a texture, not another texture: the relief
-  // and its shading stay, and the material's own colour shows through.
-  if (state.ground === "white") {
+  // The white sheet is the absence of a texture, not another texture: the
+  // relief and its shading stay and the material's own white shows through.
+  // Everything drawn above the ground is untouched — the red boundary, the
+  // streets, the zoning, the masses. It hides the map and nothing else.
+  if (state.mapWhite) {
     groundMat.map = null;
     groundMat.needsUpdate = true;
     return;
@@ -617,6 +623,23 @@ function setGround(which) {
   applyGround(state.town);
   syncViewBtns();
   save();
+}
+
+// თეთრი used to be a third ground, which made it a choice you had to undo by
+// remembering which map you were on. It is a sheet over the map instead, so
+// switching it off puts the student back where they were.
+function toggleMapWhite() {
+  state.mapWhite = !state.mapWhite;
+  applyGround(state.town);
+  syncViewBtns();
+  save();
+}
+
+// Anything saved while თეთრი was still a ground carries ground:"white". Split
+// that back into the map it was hiding and the switch that was hiding it.
+function adoptGround(g) {
+  if (g === "white") { state.mapWhite = true; return; }
+  if (g === "map" || g === "sat") state.ground = g;
 }
 
 // Real OSM building footprints, street centrelines and an SRTM heightfield for
@@ -966,13 +989,16 @@ function syncViewBtns() {
   if (seg) {
     // The school plot is invented ground and the scan already IS a photograph,
     // so neither has a second map to offer.
-    // white needs no satellite pass, so the switch shows on any city ground
     seg.style.display = isCity() ? "" : "none";
     var sb = document.getElementById("gnd-sat");
     sb.style.display = hasSat(state.town) ? "" : "none";
     document.getElementById("gnd-map").classList.toggle("on", state.ground === "map");
     sb.classList.toggle("on", state.ground === "sat");
-    document.getElementById("gnd-white").classList.toggle("on", state.ground === "white");
+  }
+  var wr = document.getElementById("whiterow");
+  if (wr) {
+    wr.style.display = isCity() ? "" : "none";
+    document.getElementById("whitebtn").classList.toggle("on", !!state.mapWhite);
   }
 }
 
@@ -2559,7 +2585,8 @@ function save() {
       town: state.town, variant: state.variant, data: state.data, nextId: state.nextId,
       ctxOn: state.ctxOn, ctxH: state.ctxH, sites: state.sites,
       massWhite: state.massWhite, siteOn: state.siteOn,
-      cgiz: state.cgiz, snapOn: state.snap.on, ground: state.ground
+      cgiz: state.cgiz, snapOn: state.snap.on, ground: state.ground,
+      mapWhite: state.mapWhite
     }));
   } catch (e) { /* private mode */ }
   histCommit();
@@ -2580,7 +2607,8 @@ function load() {
     if (typeof o.siteOn === "boolean") state.siteOn = o.siteOn;
     // files written before the third ground existed carry a boolean
     if (typeof o.sat === "boolean") state.ground = o.sat ? "sat" : "map";
-    if (o.ground === "map" || o.ground === "sat" || o.ground === "white") state.ground = o.ground;
+    adoptGround(o.ground);
+    if (typeof o.mapWhite === "boolean") state.mapWhite = o.mapWhite;
     if (o.cgiz === "move" || o.cgiz === "rotate" || o.cgiz === "scale") state.cgiz = o.cgiz;
     if (typeof o.snapOn === "boolean") state.snap.on = o.snapOn;
     if (o.ctxH) state.ctxH = o.ctxH;
@@ -2790,7 +2818,7 @@ document.getElementById("updcopy").addEventListener("click", function () {
 });
 document.getElementById("gnd-map").addEventListener("click", function () { setGround("map"); });
 document.getElementById("gnd-sat").addEventListener("click", function () { setGround("sat"); });
-document.getElementById("gnd-white").addEventListener("click", function () { setGround("white"); });
+document.getElementById("whitebtn").addEventListener("click", toggleMapWhite);
 document.getElementById("sitetgl").addEventListener("click", toggleSite);
 document.getElementById("save").addEventListener("click", function () { schExport(); });
 
@@ -3397,6 +3425,25 @@ var skyMat = new THREE.ShaderMaterial({
 var skyDome = new THREE.Mesh(new THREE.SphereGeometry(1400, 24, 16), skyMat);
 SC.scene.add(skyDome);
 
+// ქალაქი needs its own dome, and its own copy of the material. Its own dome
+// because the city is framed in kilometres, not tens of metres: the camera goes
+// out to 3800 m, so the sphere has to be wider than that and still inside the
+// 8000 m far plane. Its own material because the studio's turns flat grey while
+// SC.env is "basic", and the city must not go grey because someone left the
+// other tab on საბაზისო. Nothing raycasts against it — picking targets the
+// ground and objRoot by name — so it cannot be clicked by accident.
+var citySkyMat = skyMat.clone();
+// The gradient is a function of which way you are looking, and the shader reads
+// that direction from the world origin. In the studio the camera never gets far
+// from the centre, so that is close enough; over a town it is not — at 1400 m
+// out, a 4000 m dome turns the sun into a smear across half the sky. Take the
+// direction from the camera and it is a sun again. cameraPosition is one of the
+// uniforms three.js injects into every ShaderMaterial.
+citySkyMat.fragmentShader = citySkyMat.fragmentShader.replace(
+  "normalize(vWorld)", "normalize(vWorld - cameraPosition)");
+var citySky = new THREE.Mesh(new THREE.SphereGeometry(4000, 32, 20), citySkyMat);
+scene.add(citySky);
+
 function lerpCol(a, b, t) { return new THREE.Color(a).lerp(new THREE.Color(b), t); }
 
 function applyLighting() {
@@ -3423,10 +3470,11 @@ function applyLighting() {
         sun: lerpCol(0xFF9A52, 0xFFF6E8, t), back: null };
   if (!P.back) P.back = P.top.clone().lerp(P.bottom, 0.38);
 
-  // ქალაქი gets no dome. A gradient behind a plan only makes the plan harder to
-  // read, so the city takes the sky as one flat colour and keeps the shadows,
-  // which are the part that teaches anything: turn the sun and the streets tell
-  // you which side of them will be in shade at four o'clock.
+  // ქალაქი gets the same sky and the same sun. The shadows are the part that
+  // teaches anything — turn the sun and the streets tell you which side of them
+  // will be in shade at four o'clock — but the sky has to be a gradient to read
+  // as sky at all: averaged into one colour, a navy zenith over an orange
+  // horizon comes out grey.
   sun.position.copy(dir).multiplyScalar(1600);   // the distance it always stood at
   sun.intensity = L.sun;
   sun.castShadow = L.sun > 0.02;
@@ -3434,7 +3482,11 @@ function applyLighting() {
   cityHemi.color.copy(P.hemi);
   cityHemi.groundColor.copy(P.gnd);
   cityHemi.intensity = L.sky;
-  scene.background.copy(P.back);
+  citySkyMat.uniforms.topColor.value.copy(P.top);
+  citySkyMat.uniforms.bottomColor.value.copy(P.bottom);
+  citySkyMat.uniforms.sunGlow.value = P.glow;
+  citySkyMat.uniforms.sunDir.value.copy(dir);
+  scene.background.copy(P.back);       // only ever seen if the dome is removed
 
   if (SC.env === "basic") {
     // flat gray studio backdrop, 3ds Max style — sun still lights the model
@@ -5400,7 +5452,8 @@ function schExport() {
                   city: { town: state.town, variant: state.variant, data: state.data,
                           sites: state.sites, nextId: state.nextId,
                           ctxOn: state.ctxOn, ctxH: state.ctxH,
-                          ground: state.ground, sat: state.ground === "sat" } };
+                          ground: state.ground, sat: state.ground === "sat",
+                          mapWhite: state.mapWhite } };
   var base = (SC.planName || "bekura3d").replace(/[^\p{L}\p{N}_-]+/gu, "-").slice(0, 40);
   var blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
   var a = document.createElement("a");
@@ -5465,7 +5518,8 @@ function adoptSeed() {
       if (c.variant) state.variant = c.variant;
       if (typeof c.ctxOn === "boolean") state.ctxOn = c.ctxOn;
       if (typeof c.sat === "boolean") state.ground = c.sat ? "sat" : "map";
-      if (c.ground) state.ground = c.ground;
+      adoptGround(c.ground);
+      if (typeof c.mapWhite === "boolean") state.mapWhite = c.mapWhite;
       if (typeof c.massWhite === "boolean") state.massWhite = c.massWhite;
       if (typeof c.siteOn === "boolean") state.siteOn = c.siteOn;
       if (c.ctxH) state.ctxH = c.ctxH;
@@ -5517,7 +5571,8 @@ function schImportFile(f) {
         if (o.city.variant) state.variant = o.city.variant;
         if (typeof o.city.ctxOn === "boolean") state.ctxOn = o.city.ctxOn;
         if (typeof o.city.sat === "boolean") state.ground = o.city.sat ? "sat" : "map";
-        if (o.city.ground) state.ground = o.city.ground;
+        adoptGround(o.city.ground);
+        if (typeof o.city.mapWhite === "boolean") state.mapWhite = o.city.mapWhite;
         if (o.city.ctxH) state.ctxH = o.city.ctxH;
         if (o.city.town && TOWNS[o.city.town]) loadTown(ctown);
         else buildSite(state.town);
@@ -5917,10 +5972,21 @@ if (/[?&]selftest=1/.test(location.search)) {
   SC.light.sun = 0; applyLighting();
   want("a dimmed city sun stops casting shadow", sun.castShadow ? "yes" : "no", "no");
   SC.light.sun = 0.8; SC.light.mode = "white"; applyLighting();
-  var cbg = scene.background.getHexString();
+  want("a white city sky is white overhead",
+       citySkyMat.uniforms.topColor.value.getHexString(), "ffffff");
   SC.light.mode = "natural"; applyLighting();
-  want("the city sky answers the ცა buttons",
-       cbg !== scene.background.getHexString() ? "yes" : "no", "yes");
+  want("and a natural one is not",
+       citySkyMat.uniforms.topColor.value.getHexString() !== "ffffff" ? "yes" : "no", "yes");
+  want("the city sky is its own material, not the studio's",
+       citySkyMat === skyMat ? "shared" : "separate", "separate");
+  // the grey studio backdrop must not leak across tabs
+  want("and stays blue while the other tab sits in the studio",
+       citySkyMat.uniforms.topColor.value.getHexString() !==
+       skyMat.uniforms.topColor.value.getHexString() ? "yes" : "no", "yes");
+  want("the camera cannot reach the inside of the dome",
+       citySky.geometry.parameters.radius > 3800 ? "yes" : "no", "yes");
+  want("and the city sky is measured from the camera, not the town centre",
+       /cameraPosition/.test(citySkyMat.fragmentShader) ? "yes" : "no", "yes");
   SC.env = "school";
 
   // Both panels render the same two sections, and neither steals the other's
@@ -5933,6 +5999,22 @@ if (/[?&]selftest=1/.test(location.search)) {
        "1/1");
 
   SC.light = savedL; SC.env = savedEnv; applyLighting();
+
+  // ---- the white sheet ----------------------------------------------------
+  var _g0 = state.ground, _w0 = state.mapWhite;
+  state.ground = "sat"; state.mapWhite = false;
+  toggleMapWhite();
+  want("თეთრი takes the map off the ground", groundMat.map === null ? "yes" : "no", "yes");
+  want("and leaves the map choice where it was", state.ground, "sat");
+  want("it covers the map and not the boundary drawn over it",
+       siteMesh && siteMesh.visible === state.siteOn ? "yes" : "no", "yes");
+  toggleMapWhite();
+  want("switching it off hands back the same map",
+       state.ground + "/" + state.mapWhite, "sat/false");
+  adoptGround("white");
+  want("a save from when თეთრი was a ground opens as the switch",
+       state.mapWhite + "/" + state.ground, "true/sat");
+  state.ground = _g0; state.mapWhite = _w0; applyGround(state.town);
 
   // ---- inset --------------------------------------------------------------
   var insBox = pBox(10, 10, 10);
