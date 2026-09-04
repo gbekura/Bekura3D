@@ -64,8 +64,10 @@ To rebuild the ground textures from source (needs internet):
 
     bash data/make-maps.sh
 
-`?selftest=1` runs 83 assertions in the page and prints the results over it. Run it
-before shipping a build.
+`?selftest=1` runs 135 assertions in the page and prints the results over it. Run it
+before shipping a build, and run it on `bekura3d.html` rather than on `app.html`:
+the bundle is what students open, and three of the assertions need the ground
+textures that only the bundle carries inline.
 
 ## Four tabs
 
@@ -357,6 +359,50 @@ everything else.
 The seed only speaks when the live store is silent: work already on the machine
 is the newer copy and always wins. On adoption the seed is written straight into
 `localStorage`, so a later edit to one half cannot drop the other.
+
+### The save format, and how to add a feature without breaking old plans
+
+Every payload the app writes, in `localStorage` and in a `.bekura3d.json` file,
+carries its format version as `v`. One constant near the top of the script,
+`SCHEMA`, is the version this build writes. A payload with no `v` at all is read
+as version 1, which is what every plan saved before this existed looks like.
+
+Three routes bring data in: `localStorage`, an opened file, and the
+`bekura3d-data.js` seed. All three go through `readPayload` / `migratePayload`,
+so a rule written once applies to all of them and cannot drift between them.
+Two directions have to work, because the machines in a workshop are updated at
+different moments:
+
+| what arrives | what happens |
+|---|---|
+| **older data, newer app** | `MIGRATIONS` walks it forward one version at a time. The text as it stood before migration is copied to `<key>-v<n>` first, so a wrong migration is recoverable. |
+| **newer data, older app** | It opens. Fields this build has never heard of are kept and written back untouched, and the higher `v` is kept too, so the build that understands them still recognises them. |
+
+**Adding a field needs no migration.** Every reader already guards each field it
+takes, and a field this build does not know is carried through by the rule
+above. Add it to the object `save()` builds, read it back with the same
+`if (typeof o.x === ...)` guard the fields around it use, and you are done.
+
+**Bump `SCHEMA` and write a migration step only when the shape or the meaning of
+data that already exists has to change**: a renamed zone id, a field that
+changes units, a list that becomes a map. Then add the step to `MIGRATIONS`,
+keyed by the version it upgrades *from*, and never delete it afterwards: a
+laptop can arrive from any age.
+
+```js
+var SCHEMA = 2;
+var MIGRATIONS = {
+  1: function (o) {          // 1 -> 2
+    // ...change the data...
+    return o;
+  }
+};
+```
+
+`?selftest=1` asserts all of this: that an unversioned payload reads as
+version 1, that an unknown field survives a round trip, that an older build does
+not downgrade a newer plan, that corrupt storage is kept for rescue rather than
+thrown away, and that the migration chain has no gap in it.
 
 ## Credits
 
