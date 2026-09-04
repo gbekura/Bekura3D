@@ -320,9 +320,12 @@ arithmetic, so the two register by construction rather than by eye and a zone dr
 sits on the same roofs on the other. `make-maps.sh map` or `make-maps.sh sat telavi` narrows
 it. The satellite pass is optional: without `ground/*-sat.jpg` the app hides the სატელიტი
 button and leaves რუკა on its own. **თეთრი ფონი** is a separate switch, not a third
-map, so it works either way: it takes the map off the ground and leaves the red boundary,
-the streets, the zoning and the masses drawn over it. Switch it off and the რუკა or
-სატელიტი you were on comes back.
+map: it lays a blank white sheet **inside the red working-area boundary and nowhere else**,
+so the map outside the line is untouched and the site becomes a clean surface to plan on.
+The sheet is built from the ring the red line is built from, so the two edges are the same
+edge. The ground stack, in metres over the terrain: streets 0.5, the sheet 0.7, zoning areas
+0.9, the red line 1.2 - the sheet covers the map and the street lines printed on it, and the
+brief and the plan stay legible over the top. Switch it off and the map inside comes back.
 
 ## Keeping work when you ship a new build
 

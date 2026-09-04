@@ -372,7 +372,7 @@
        <button id="gnd-sat" title="აეროფოტო: რა დგას მიწაზე სინამდვილეში">სატელიტი</button>
      </div>
      <div class="vrow" id="whiterow" style="margin-top:7px">
-       <button class="vbtn" id="whitebtn" title="თეთრი ფურცელი რუკის ნაცვლად. წითელი საზღვარი, ქუჩები და შენი გეგმა თავზე რჩება">
+       <button class="vbtn" id="whitebtn" title="ცარიელი თეთრი ფურცელი წითელი საზღვრის შიგნით. გარეთ რუკა უცვლელი რჩება; ხაზი, ქუჩები და შენი გეგმა — ფურცლის თავზე">
          <span class="vi">▢</span>თეთრი ფონი</button>
      </div>
    </section>
@@ -587,15 +587,6 @@ function groundURL(id) {
 }
 
 function applyGround(id) {
-  // The white sheet is the absence of a texture, not another texture: the
-  // relief and its shading stay and the material's own white shows through.
-  // Everything drawn above the ground is untouched — the red boundary, the
-  // streets, the zoning, the masses. It hides the map and nothing else.
-  if (state.mapWhite) {
-    groundMat.map = null;
-    groundMat.needsUpdate = true;
-    return;
-  }
   var key = groundKey(id);
   if (texCache[key]) {
     groundMat.map = texCache[key];
@@ -625,12 +616,13 @@ function setGround(which) {
   save();
 }
 
-// თეთრი used to be a third ground, which made it a choice you had to undo by
-// remembering which map you were on. It is a sheet over the map instead, so
-// switching it off puts the student back where they were.
+// თეთრი used to be a third ground, which whited out the entire town and made
+// itself a choice you had to undo by remembering which map you were on. It is a
+// sheet inside the working area now: the map outside the red line is never
+// touched, and რუკა and სატელიტი stay a straight two-way choice.
 function toggleMapWhite() {
   state.mapWhite = !state.mapWhite;
-  applyGround(state.town);
+  if (siteWhite) siteWhite.visible = state.mapWhite;
   syncViewBtns();
   save();
 }
@@ -885,17 +877,21 @@ function ribbonOnTerrain(ring, W) {
 // A zoning area is flat in plan but the ground under it is not. Triangulate the
 // outline, split any triangle whose edge is longer than one heightfield cell,
 // then drop every vertex onto the terrain. Corners alone would bridge a valley.
-function drapedFill(pts, lift) {
+function drapedFill(pts, lift, maxEdge) {
   if (!pts || pts.length < 3) return null;
   var contour = pts.map(function (q) { return new THREE.Vector2(q[0], q[1]); });
   var tris;
   try { tris = THREE.ShapeUtils.triangulateShape(contour, []); } catch (e) { return null; }
   if (!tris || !tris.length) return null;
 
-  var MAX = 28, out = [];                   // 28 m is the heightfield spacing
+  // 28 m is two heightfield cells, which is close enough for a zoning area of a
+  // few tens of metres. A caller working at the scale of a whole working area
+  // has to ask for finer, or its triangles sag under the terrain they span.
+  var MAX = maxEdge || 28, out = [];
+  var CAP = MAX >= 28 ? 7 : 13;             // splits at most 2^CAP per triangle
   function emit(a, b, c, depth) {
     var ab = a.distanceTo(b), bc = b.distanceTo(c), ca = c.distanceTo(a);
-    if (depth >= 7 || Math.max(ab, bc, ca) <= MAX) { out.push(a, b, c); return; }
+    if (depth >= CAP || Math.max(ab, bc, ca) <= MAX) { out.push(a, b, c); return; }
     if (ab >= bc && ab >= ca) {
       var m1 = a.clone().lerp(b, .5); emit(a, m1, c, depth + 1); emit(m1, b, c, depth + 1);
     } else if (bc >= ca) {
@@ -924,14 +920,43 @@ function siteRing(town) {
   return [[s.cx - h, s.cz - h], [s.cx + h, s.cz - h], [s.cx + h, s.cz + h], [s.cx - h, s.cz + h]];
 }
 
+// The blank sheet თეთრი ფონი switches on. Unlit white on purpose: the point is
+// a clean surface to draw a plan over, and a lit one would go grey the moment
+// somebody drops the sun. It is built from the same ring as the red line and
+// draped the same way, so the two edges are the same edge.
+var siteWhite = null;
+var siteWhiteMat = new THREE.MeshBasicMaterial({
+  color: 0xffffff, side: THREE.DoubleSide,
+  // The same bias the zoning fills carry, for the same reason: a surface laid a
+  // few centimetres over the ground has to win the depth test at 1,7 km out,
+  // where one depth-buffer step is worth about 17 cm.
+  polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2
+});
+
 function buildSite(town) {
   if (siteMesh) { scene.remove(siteMesh); siteMesh.geometry.dispose(); siteMesh = null; }
+  if (siteWhite) { scene.remove(siteWhite); siteWhite.geometry.dispose(); siteWhite = null; }
   var ring = siteRing(town);
   if (!ring || ring.length < 3) return;
   siteMesh = new THREE.Mesh(ribbonOnTerrain(ring, 4), siteMat);
   siteMesh.renderOrder = 3;                    // over the ground and the roads
   siteMesh.visible = state.siteOn;
   scene.add(siteMesh);
+
+  // The ground stack, in metres over the terrain: streets 0.5, this sheet 0.7,
+  // zoning areas 0.9, the red line 1.2. So the sheet blanks the map and the
+  // street lines printed on it, and the plan and the brief stay over the top —
+  // by height, at every camera distance, rather than by a polygon offset that is
+  // worth 2 cm up close and 34 cm from a kilometre out.
+  // 10 m triangles: finer than the 14 m heightfield, so the sheet follows the
+  // ground instead of cutting down through it.
+  var wg = drapedFill(ring, 0.7, 10);
+  if (wg) {
+    siteWhite = new THREE.Mesh(wg, siteWhiteMat);
+    siteWhite.renderOrder = 2;                 // over the ground, under the line
+    siteWhite.visible = !!state.mapWhite;
+    scene.add(siteWhite);
+  }
 }
 
 // The red line is a brief, not a drawing: it has to be possible to look at the
@@ -1147,7 +1172,7 @@ function clearRoot() {
 // later, at massing, as a separate object placed on top of it.
 function makeAreaMesh(it) {
   var col = new THREE.Color(zoneOf(it.type).color);
-  var g = drapedFill(it.pts, 0.5);
+  var g = drapedFill(it.pts, 0.9);      // over თეთრი ფონი's sheet at 0.7
   if (!g) return null;
   var m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
     color: col, transparent: true, opacity: 0.42, side: THREE.DoubleSide,
@@ -6001,20 +6026,70 @@ if (/[?&]selftest=1/.test(location.search)) {
   SC.light = savedL; SC.env = savedEnv; applyLighting();
 
   // ---- the white sheet ----------------------------------------------------
+  // It blanks the working area and nothing else: the map outside the red line
+  // is untouched, and the line still draws over the top of the sheet.
   var _g0 = state.ground, _w0 = state.mapWhite;
+  state.mapWhite = false;
+  // Comparing the texture to itself, not to null: the map loads asynchronously
+  // and may not have arrived yet this early. What matters is that the sheet
+  // never touches it either way.
+  var _m0 = groundMat.map;
+  toggleMapWhite();
+  want("თეთრი switches a sheet on", (siteWhite && siteWhite.visible) ? "yes" : "no", "yes");
+  want("and leaves the map under it exactly as it was",
+       groundMat.map === _m0 ? "same" : "changed", "same");
+  want("the sheet lies under the red line",
+       (siteWhite && siteWhite.renderOrder < siteMesh.renderOrder) ? "yes" : "no", "yes");
+  var _wp = siteWhite.geometry.getAttribute("position");
+  want("and 0.7 m up: over the streets at 0.5, under the zoning at 0.9",
+       (_wp.getY(0) - terrainAt(_wp.getX(0), _wp.getZ(0))).toFixed(2), "0.70");
+  // every vertex sits on the ground, and the triangles between them are short
+  // enough that the surface does not sag through it
+  var _sag = 0, _long = 0;
+  for (var _i = 0; _i < _wp.count; _i += 3) {
+    for (var _k = 0; _k < 3; _k++) {
+      var _vx = _wp.getX(_i + _k), _vz = _wp.getZ(_i + _k);
+      _sag = Math.max(_sag, Math.abs(_wp.getY(_i + _k) - terrainAt(_vx, _vz) - 0.7));
+    }
+    for (var _e = 0; _e < 3; _e++) {
+      var _j = _i + _e, _n = _i + (_e + 1) % 3;
+      _long = Math.max(_long, Math.hypot(_wp.getX(_j) - _wp.getX(_n),
+                                         _wp.getZ(_j) - _wp.getZ(_n)));
+    }
+  }
+  want("every corner of the sheet is on the ground", _sag < 1e-3 ? "yes" : "no", "yes");
+  // Asking for 10 m; a handful of slivers bottom out on the recursion cap a
+  // little above that. What matters is that none of them spans two cells of the
+  // heightfield, which is where a flat triangle starts sagging through it.
+  want("and no triangle spans two cells of the heightfield",
+       _long <= 16 ? "yes" : "no", "yes");
+
+  // the sheet has to stop where the boundary stops — not at the edge of town
+  var _ring = siteRing(state.town);
+  var _rx = _ring.map(function (p) { return p[0]; });
+  var _rz = _ring.map(function (p) { return p[1]; });
+  siteWhite.geometry.computeBoundingBox();
+  var _bb = siteWhite.geometry.boundingBox;
+  want("it stops where the boundary stops, on x",
+       (Math.abs(_bb.min.x - Math.min.apply(null, _rx)) < 1 &&
+        Math.abs(_bb.max.x - Math.max.apply(null, _rx)) < 1) ? "yes" : "no", "yes");
+  want("and on z",
+       (Math.abs(_bb.min.z - Math.min.apply(null, _rz)) < 1 &&
+        Math.abs(_bb.max.z - Math.max.apply(null, _rz)) < 1) ? "yes" : "no", "yes");
+  // and the working area really is a fraction of the map it sits on
+  want("which is a good deal smaller than the town",
+       (_bb.max.x - _bb.min.x) < townSize(state.town) * 0.6 ? "yes" : "no", "yes");
+
+  toggleMapWhite();
+  want("switching it off takes the sheet away", siteWhite.visible ? "on" : "off", "off");
+  want("and never touched the map choice", state.ground, _g0);
   state.ground = "sat"; state.mapWhite = false;
-  toggleMapWhite();
-  want("თეთრი takes the map off the ground", groundMat.map === null ? "yes" : "no", "yes");
-  want("and leaves the map choice where it was", state.ground, "sat");
-  want("it covers the map and not the boundary drawn over it",
-       siteMesh && siteMesh.visible === state.siteOn ? "yes" : "no", "yes");
-  toggleMapWhite();
-  want("switching it off hands back the same map",
-       state.ground + "/" + state.mapWhite, "sat/false");
   adoptGround("white");
   want("a save from when თეთრი was a ground opens as the switch",
        state.mapWhite + "/" + state.ground, "true/sat");
-  state.ground = _g0; state.mapWhite = _w0; applyGround(state.town);
+  state.ground = _g0; state.mapWhite = _w0;
+  if (siteWhite) siteWhite.visible = state.mapWhite;
+  applyGround(state.town);
 
   // ---- inset --------------------------------------------------------------
   var insBox = pBox(10, 10, 10);
