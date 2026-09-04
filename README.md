@@ -32,6 +32,15 @@ opened by double-click is a `file://` document with no shell and no filesystem;
 what the button does is tell you where the script is and print which commit the
 open page was built from, so you can see whether the pull landed.
 
+## Where the buttons are
+
+**სურათი, შენახვა, გახსნა, მონაცემები, განახლება** and **გასუფთავება** live behind the
+**ფაილი** button at the right of the header. They used to sit in the header itself, which
+wanted 1595px on the ქალაქი tab and so wrapped onto a second row on any laptop. Saving and
+opening also answer <kbd>Ctrl</kbd>+<kbd>S</kbd> and <kbd>Ctrl</kbd>+<kbd>O</kbd>. Everything
+else - the tabs, the town, გეგმა/3D, the projection, the variant and შენობები - is still one
+click away in the header.
+
 **A new build cannot overwrite a team's work.** Work lives in the browser's own
 storage, which survives replacing the page. For anything that storage cannot survive -
 a fresh laptop, a cleared browser, carrying a class to another machine, the

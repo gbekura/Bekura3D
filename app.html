@@ -26,14 +26,27 @@
   button{outline:none}
   button:focus,button:focus-visible{outline:none}
   html,body{height:100%;overflow:hidden;background:var(--navy-3);color:#fff;font-family:var(--ka)}
-  #app{display:grid;grid-template-columns:138px 1fr 268px;grid-template-rows:56px 1fr 34px;height:100%}
+  #app{display:grid;grid-template-columns:138px 1fr 268px;grid-template-rows:auto 1fr auto;height:100%}
 
-  header{grid-column:1/4;display:flex;align-items:center;gap:10px;padding:0 16px;
+  header{grid-column:1/4;display:flex;align-items:center;flex-wrap:wrap;gap:10px 10px;
+         min-height:56px;padding:7px 16px;
          background:var(--navy);border-bottom:1px solid rgba(255,255,255,.12)}
-  header .brand{font-size:21px;font-weight:700;letter-spacing:.3px}
+  /* Controls keep their own width and wrap to a second row instead of being
+     squeezed: at 1366 the four tab labels were losing 16% of their width. */
+  header .seg,header .ghost,header select{flex:none}
+  header .brand{font-size:21px;font-weight:700;letter-spacing:.3px;
+        flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* The name is the first thing worth giving up: at 1280 the full header wants
+     about 1340px, and dropping the subtitle buys back the 140 that keeps every
+     control on one row. The tabs never give up anything. */
+  @media (max-width:1400px){ header .brand span{display:none} }
+  @media (max-width:1120px){ header .brand{display:none} }
   header .brand span{color:var(--cyan)}
   .seg{display:flex;background:rgba(255,255,255,.06);border-radius:10px;padding:3px;gap:3px;
        border:1px solid rgba(255,255,255,.07)}
+  /* "ვარიანტი A" was breaking over two lines inside its button, which made the
+     whole header 15px taller than the row it sits in. */
+  .seg button{white-space:nowrap}
   .seg button{background:none;border:0;color:rgba(255,255,255,.62);font-family:var(--ka);
               font-size:14px;padding:7px 14px;border-radius:7px;cursor:pointer;
               transition:background .15s ease,color .15s ease}
@@ -210,8 +223,15 @@
         border:1px solid rgba(255,255,255,.4)}
   #ctxmenu button.on .dot{background:var(--cyan);border-color:var(--cyan)}
 
-  footer{grid-column:1/4;display:flex;align-items:center;gap:16px;padding:0 16px;background:var(--navy);
+  footer{grid-column:1/4;display:flex;align-items:center;flex-wrap:wrap;gap:4px 16px;
+         min-height:34px;padding:5px 16px;background:var(--navy);
          border-top:1px solid rgba(255,255,255,.12);font-size:12.5px;color:rgba(255,255,255,.6)}
+  /* Without min-width:0 a flex child refuses to narrow past its longest word,
+     so the hint grew downward out of the bar instead of wrapping inside it.
+     The spacer stops growing here: it and the hint were splitting the free
+     space evenly, which cost the hint three lines it did not need. */
+  #hint{flex:1 1 auto;min-width:0}
+  footer .spacer{flex:0 0 0}
   footer .credit{color:rgba(255,255,255,.38);font-size:11.5px;white-space:nowrap}
   footer .credit a{color:inherit;text-decoration:none;
         border-bottom:1px solid rgba(255,255,255,.16);
@@ -219,6 +239,18 @@
   footer .credit a:hover{color:rgba(255,255,255,.82);border-bottom-color:rgba(255,255,255,.45)}
   footer .credit a:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
   kbd{background:rgba(255,255,255,.12);border-radius:4px;padding:1px 6px;font-family:var(--ka);font-size:11.5px}
+
+  /* The file actions, one button instead of six. They are the least-touched
+     controls in the header and they were costing it 567 of the 1595px it wanted. */
+  #filemenu{position:relative;flex:none}
+  #filepop{position:absolute;top:calc(100% + 8px);right:0;z-index:50;display:none;
+        flex-direction:column;gap:4px;min-width:216px;padding:8px;
+        background:var(--navy-2);border:1px solid rgba(255,255,255,.18);
+        border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.55)}
+  #filemenu.on #filepop{display:flex}
+  #filepop .ghost{display:flex;align-items:center;justify-content:space-between;
+        gap:14px;width:100%;text-align:left}
+  #filepop .sk{color:rgba(255,255,255,.32);font-size:11px;font-family:Consolas,monospace}
 
   /* The update panel. A file:// page has no shell, so this cannot run the pull
      itself; it says where to click and which build is on screen. */
@@ -273,13 +305,18 @@
     </div>
     <div class="spacer"></div>
     <button class="ghost on" id="ctxbtn">შენობები</button>
-    <button class="ghost" id="shot">სურათი</button>
-    <button class="ghost" id="save">შენახვა</button>
-    <button class="ghost" id="open">გახსნა</button>
-    <input type="file" id="openf" accept=".json,application/json" style="display:none">
-    <button class="ghost" id="datafile" title="ყველა ქალაქი და ყველა მოდელი ერთ ფაილში, პროგრამის გვერდით დასადებად">მონაცემები</button>
-    <button class="ghost" id="updbtn" title="როგორ განაახლო პროგრამა">განახლება</button>
-    <button class="ghost" id="clear">გასუფთავება</button>
+    <div id="filemenu">
+      <button class="ghost" id="filebtn" title="ფაილის მოქმედებები">ფაილი ▾</button>
+      <div id="filepop">
+        <button class="ghost" id="shot">სურათი</button>
+        <button class="ghost" id="save">შენახვა<span class="sk">Ctrl+S</span></button>
+        <button class="ghost" id="open">გახსნა<span class="sk">Ctrl+O</span></button>
+        <input type="file" id="openf" accept=".json,application/json" style="display:none">
+        <button class="ghost" id="datafile" title="ყველა ქალაქი და ყველა მოდელი ერთ ფაილში, პროგრამის გვერდით დასადებად">მონაცემები</button>
+        <button class="ghost" id="updbtn" title="როგორ განაახლო პროგრამა">განახლება</button>
+        <button class="ghost" id="clear">გასუფთავება</button>
+      </div>
+    </div>
   </header>
 
   <div id="rail">
@@ -342,6 +379,9 @@
       <h3>ᲠᲔᲓᲐᲥᲢᲘᲠᲔᲑᲐ</h3>
       <div id="props"><p class="empty">მონიშნე ობიექტი, რომ შეცვალო სიმაღლე.</p></div>
     </section>
+    <!-- ხედი and განათება, the same two sections the modelling tabs carry.
+         cityRenderVL fills this. -->
+    <div id="sideCityVL"></div>
     <section>
       <h3>ᲐᲠᲡᲔᲑᲣᲚᲘ ᲥᲐᲚᲐᲥᲘ</h3>
       <div id="ctxbox"></div>
@@ -491,7 +531,11 @@ var camera = persp;
 // orbit state, hand-rolled so the view stays constrained and predictable
 var orbit = { target: new THREE.Vector3(0, 0, 0), dist: 900, az: -0.6, el: 0.52, planZoom: 620 };
 
-scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x2a3550, 0.62));
+// Named, because the ქალაქი panel drives it now. The city keeps its own rig —
+// its sun stands 1600 m out rather than 420 — but takes its angle and its
+// colour from the same SC.light the modelling tabs use.
+var cityHemi = new THREE.HemisphereLight(0xdfe9ff, 0x2a3550, 0.62);
+scene.add(cityHemi);
 var sun = new THREE.DirectionalLight(0xffffff, 0.62);
 sun.position.set(-760, 1240, 600);
 sun.castShadow = true;
@@ -2697,6 +2741,29 @@ function showUpdate() {
   document.getElementById("updwrap").classList.add("on");
 }
 document.getElementById("updbtn").addEventListener("click", showUpdate);
+
+// ---------------------------------------------------------------- file menu
+var fmWrap = document.getElementById("filemenu");
+function fileMenu(on) { fmWrap.classList.toggle("on", on); }
+document.getElementById("filebtn").addEventListener("click", function (ev) {
+  ev.stopPropagation();                       // the document listener closes it
+  fileMenu(!fmWrap.classList.contains("on"));
+});
+// Any item closes the menu. The item's own handler runs first, on the way up.
+document.getElementById("filepop").addEventListener("click", function () { fileMenu(false); });
+document.addEventListener("click", function (ev) {
+  if (!fmWrap.contains(ev.target)) fileMenu(false);
+});
+// Ctrl+S and Ctrl+O keep the two that get used every session one keystroke
+// away. Deliberately outside the main keydown handler, which ignores anything
+// typed into a field: naming a plan and then saving it is the normal order.
+window.addEventListener("keydown", function (ev) {
+  if (ev.key === "Escape") { fileMenu(false); return; }
+  if (!(ev.ctrlKey || ev.metaKey) || ev.altKey || ev.shiftKey) return;
+  var k = (ev.key || "").toLowerCase();
+  if (k === "s") { ev.preventDefault(); document.getElementById("save").click(); }
+  else if (k === "o") { ev.preventDefault(); document.getElementById("open").click(); }
+});
 document.getElementById("updclose").addEventListener("click", function () {
   document.getElementById("updwrap").classList.remove("on");
 });
@@ -3342,6 +3409,33 @@ function applyLighting() {
   schSun.castShadow = L.sun > 0.02;
 
   var t = Math.max(0, Math.min(1, L.el / 55));        // 0 = on the horizon
+
+  // The sky the student asked for, worked out once. ქალაქი always takes it; the
+  // modelling scene takes it too, unless it is standing in the grey studio.
+  var P = (L.mode === "white")
+    ? { top: new THREE.Color(0xFFFFFF), bottom: new THREE.Color(0xF1F5FA), glow: 0,
+        hemi: new THREE.Color(0xFFFFFF), gnd: new THREE.Color(0xE8ECF2),
+        sun: new THREE.Color(0xFFFFFF), back: new THREE.Color(0xEFF4FA) }
+    // low sun warms the horizon and cools the zenith, as at dawn or dusk
+    : { top: lerpCol(0x24406E, 0x5FA0DA, t), bottom: lerpCol(0xF3A863, 0xD6E9FA, t),
+        glow: 0.35 + (1 - t) * 0.5,
+        hemi: lerpCol(0x9FB6D8, 0xDFE9FF, t), gnd: lerpCol(0x2B3446, 0x51603F, t),
+        sun: lerpCol(0xFF9A52, 0xFFF6E8, t), back: null };
+  if (!P.back) P.back = P.top.clone().lerp(P.bottom, 0.38);
+
+  // ქალაქი gets no dome. A gradient behind a plan only makes the plan harder to
+  // read, so the city takes the sky as one flat colour and keeps the shadows,
+  // which are the part that teaches anything: turn the sun and the streets tell
+  // you which side of them will be in shade at four o'clock.
+  sun.position.copy(dir).multiplyScalar(1600);   // the distance it always stood at
+  sun.intensity = L.sun;
+  sun.castShadow = L.sun > 0.02;
+  sun.color.copy(P.sun);
+  cityHemi.color.copy(P.hemi);
+  cityHemi.groundColor.copy(P.gnd);
+  cityHemi.intensity = L.sky;
+  scene.background.copy(P.back);
+
   if (SC.env === "basic") {
     // flat gray studio backdrop, 3ds Max style — sun still lights the model
     skyMat.uniforms.topColor.value.set(0x5a636e);
@@ -3354,22 +3448,12 @@ function applyLighting() {
     schHemi.intensity = L.sky;
     return;
   }
-  if (L.mode === "white") {
-    skyMat.uniforms.topColor.value.set(0xFFFFFF);
-    skyMat.uniforms.bottomColor.value.set(0xF1F5FA);
-    skyMat.uniforms.sunGlow.value = 0;
-    schHemi.color.set(0xFFFFFF);
-    schHemi.groundColor.set(0xE8ECF2);
-    schSun.color.set(0xFFFFFF);
-  } else {
-    // low sun warms the horizon and cools the zenith, as at dawn or dusk
-    skyMat.uniforms.topColor.value.copy(lerpCol(0x24406E, 0x5FA0DA, t));
-    skyMat.uniforms.bottomColor.value.copy(lerpCol(0xF3A863, 0xD6E9FA, t));
-    skyMat.uniforms.sunGlow.value = 0.35 + (1 - t) * 0.5;
-    schHemi.color.copy(lerpCol(0x9FB6D8, 0xDFE9FF, t));
-    schHemi.groundColor.copy(lerpCol(0x2B3446, 0x51603F, t));
-    schSun.color.copy(lerpCol(0xFF9A52, 0xFFF6E8, t));
-  }
+  skyMat.uniforms.topColor.value.copy(P.top);
+  skyMat.uniforms.bottomColor.value.copy(P.bottom);
+  skyMat.uniforms.sunGlow.value = P.glow;
+  schHemi.color.copy(P.hemi);
+  schHemi.groundColor.copy(P.gnd);
+  schSun.color.copy(P.sun);
   skyMat.uniforms.sunDir.value.copy(dir);
   schHemi.intensity = L.sky;
 }
@@ -4977,6 +5061,82 @@ function setSchSub(s) {
   });
 })();
 
+// ---------------------------------------------------------------- view + light
+// One rig, two panels. The sun belongs to the whole programme rather than to a
+// tab, so ქალაქი and the modelling tabs show the same four sliders and drive the
+// same SC.light. The markup takes an id prefix because a hidden panel keeps its
+// markup: two elements sharing an id would hand a slider to the wrong tab.
+function viewLightHTML(p, snap) {
+  var L = SC.light;
+  var h = '<section><h3>ᲮᲔᲓᲘ</h3>' +
+      '<div class="row"><label>ხედვის კუთხე</label>' +
+      '<input type="range" id="' + p + 'fovR" min="18" max="85" step="1" value="' + state.fov + '">' +
+      '<span class="val" id="' + p + 'fovV">' + state.fov + "°</span></div>";
+  if (snap)
+    h += '<p class="empty">მიბმა: ' + (snap.on
+      ? snap.move + " მ · " + snap.rot + "° · ×" + snap.scale
+      : "გამორთული") + "</p>";
+  h += "</section>";
+
+  h += '<section><h3>ᲒᲐᲜᲐᲗᲔᲑᲐ</h3>' +
+      '<div class="row"><label>მზის მხარე</label>' +
+      '<input type="range" id="' + p + 'lAz" min="0" max="360" step="1" value="' + L.az + '">' +
+      '<span class="val" id="' + p + 'lAzV">' + L.az + "°</span></div>" +
+      '<div class="row"><label>მზის სიმაღლე</label>' +
+      '<input type="range" id="' + p + 'lEl" min="0" max="90" step="1" value="' + L.el + '">' +
+      '<span class="val" id="' + p + 'lElV">' + L.el + "°</span></div>" +
+      '<div class="row"><label>მზე</label>' +
+      '<input type="range" id="' + p + 'lSun" min="0" max="150" step="1" value="' + Math.round(L.sun * 100) + '">' +
+      '<span class="val" id="' + p + 'lSunV">' + Math.round(L.sun * 100) + "%</span></div>" +
+      '<div class="row"><label>ცის შუქი</label>' +
+      '<input type="range" id="' + p + 'lSky" min="0" max="150" step="1" value="' + Math.round(L.sky * 100) + '">' +
+      '<span class="val" id="' + p + 'lSkyV">' + Math.round(L.sky * 100) + "%</span></div>" +
+      '<div class="row"><label>ცა</label>' +
+      '<button class="mini' + (L.mode === "natural" ? " on" : "") + '" id="' + p + 'lNat">ბუნებრივი</button>' +
+      '<button class="mini' + (L.mode === "white" ? " on" : "") + '" id="' + p + 'lWht">თეთრი</button></div>' +
+      '<p class="empty">' + (L.sun < 0.03
+        ? "მზე ჩამქრალია — სცენას მხოლოდ ცის შუქი ანათებს."
+        : "მზის მხარე და სიმაღლე ცვლის ჩრდილებსაც და ცის ფერსაც.") + "</p></section>";
+  return h;
+}
+
+function wireViewLight(p, rerender) {
+  function slider(id, vid, key, scale, suffix) {
+    var el = document.getElementById(p + id);
+    if (!el) return;
+    el.oninput = function () {
+      SC.light[key] = +this.value / scale;
+      document.getElementById(p + vid).textContent =
+        (scale === 1 ? this.value : Math.round(+this.value)) + suffix;
+      applyLighting();
+      schSave();
+    };
+  }
+  slider("lAz", "lAzV", "az", 1, "°");
+  slider("lEl", "lElV", "el", 1, "°");
+  slider("lSun", "lSunV", "sun", 100, "%");
+  slider("lSky", "lSkyV", "sky", 100, "%");
+  function setSkyMode(m) { SC.light.mode = m; applyLighting(); schSave(); rerender(); }
+  var bn = document.getElementById(p + "lNat");
+  if (bn) bn.onclick = function () { setSkyMode("natural"); };
+  var bw = document.getElementById(p + "lWht");
+  if (bw) bw.onclick = function () { setSkyMode("white"); };
+  var fv = document.getElementById(p + "fovR");
+  if (fv) fv.oninput = function () {
+    state.fov = +this.value;
+    document.getElementById(p + "fovV").textContent = state.fov + "°";
+  };
+}
+
+// ქალაქი keeps its own copy of the two sections, prefixed, with its own snap
+// numbers — the city tab snaps in metres of real ground, not studio metres.
+function cityRenderVL() {
+  var box = document.getElementById("sideCityVL");
+  if (!box) return;
+  box.innerHTML = viewLightHTML("c", state.snap);
+  wireViewLight("c", cityRenderVL);
+}
+
 function schRenderPanel() {
   var box = document.getElementById("sideSchool");
   if (!box) return;
@@ -5033,34 +5193,7 @@ function schRenderPanel() {
   }
   h += "</section>";
 
-  h += '<section><h3>ᲮᲔᲓᲘ</h3>' +
-       '<div class="row"><label>ხედვის კუთხე</label>' +
-       '<input type="range" id="fovR" min="18" max="85" step="1" value="' + state.fov + '">' +
-       '<span class="val" id="fovV">' + state.fov + "°</span></div>" +
-       '<p class="empty">მიბმა: ' + (SC.snap.on
-         ? SC.snap.move + " მ · " + SC.snap.rot + "° · ×" + SC.snap.scale
-         : "გამორთული") + "</p></section>";
-
-  var L = SC.light;
-  h += '<section><h3>ᲒᲐᲜᲐᲗᲔᲑᲐ</h3>' +
-       '<div class="row"><label>მზის მხარე</label>' +
-       '<input type="range" id="lAz" min="0" max="360" step="1" value="' + L.az + '">' +
-       '<span class="val" id="lAzV">' + L.az + "°</span></div>" +
-       '<div class="row"><label>მზის სიმაღლე</label>' +
-       '<input type="range" id="lEl" min="0" max="90" step="1" value="' + L.el + '">' +
-       '<span class="val" id="lElV">' + L.el + "°</span></div>" +
-       '<div class="row"><label>მზე</label>' +
-       '<input type="range" id="lSun" min="0" max="150" step="1" value="' + Math.round(L.sun * 100) + '">' +
-       '<span class="val" id="lSunV">' + Math.round(L.sun * 100) + "%</span></div>" +
-       '<div class="row"><label>ცის შუქი</label>' +
-       '<input type="range" id="lSky" min="0" max="150" step="1" value="' + Math.round(L.sky * 100) + '">' +
-       '<span class="val" id="lSkyV">' + Math.round(L.sky * 100) + "%</span></div>" +
-       '<div class="row"><label>ცა</label>' +
-       '<button class="mini' + (L.mode === "natural" ? " on" : "") + '" id="lNat">ბუნებრივი</button>' +
-       '<button class="mini' + (L.mode === "white" ? " on" : "") + '" id="lWht">თეთრი</button></div>' +
-       '<p class="empty">' + (L.sun < 0.03
-         ? "მზე ჩამქრალია — სცენას მხოლოდ ცის შუქი ანათებს."
-         : "მზის მხარე და სიმაღლე ცვლის ჩრდილებსაც და ცის ფერსაც.") + "</p></section>";
+  h += viewLightHTML("", SC.snap);
 
   h += '<section><h3>ᲚᲔᲒᲔᲜᲓᲐ</h3><p class="empty">დაარქვი ფერს სახელი — ეს არის ლეგენდა.</p>';
   SC.legend.forEach(function (L) {
@@ -5101,32 +5234,7 @@ function schRenderPanel() {
         : missing + " პუნქტი ჯერ არ არის გეგმაზე.") + "</p></section>";
   box.innerHTML = h;
 
-  function lightSlider(id, vid, key, scale, suffix) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.oninput = function () {
-      SC.light[key] = +this.value / scale;
-      document.getElementById(vid).textContent =
-        (scale === 1 ? this.value : Math.round(+this.value)) + suffix;
-      applyLighting();
-      schSave();
-    };
-  }
-  lightSlider("lAz", "lAzV", "az", 1, "°");
-  lightSlider("lEl", "lElV", "el", 1, "°");
-  lightSlider("lSun", "lSunV", "sun", 100, "%");
-  lightSlider("lSky", "lSkyV", "sky", 100, "%");
-  function setSkyMode(m) { SC.light.mode = m; applyLighting(); schSave(); schRenderPanel(); }
-  var bn = document.getElementById("lNat");
-  if (bn) bn.onclick = function () { setSkyMode("natural"); };
-  var bw = document.getElementById("lWht");
-  if (bw) bw.onclick = function () { setSkyMode("white"); };
-
-  var fv = document.getElementById("fovR");
-  if (fv) fv.oninput = function () {
-    state.fov = +this.value;
-    document.getElementById("fovV").textContent = state.fov + "°";
-  };
+  wireViewLight("", schRenderPanel);
   var nm = document.getElementById("schName");
   if (nm) {
     // schSave commits an undo snapshot, so a fifteen-letter name used to push
@@ -5497,6 +5605,7 @@ function setTab(t) {
     var cb = document.querySelector("#railCity .csnapbtn");
     if (cb) cb.classList.toggle("on", state.snap.on);
   }
+  cityRenderVL();          // the sliders read SC.light, which the other tab may have moved
   resize();
 }
 
@@ -5791,6 +5900,38 @@ if (/[?&]selftest=1/.test(location.search)) {
   want("white sky kills the sun glow", skyMat.uniforms.sunGlow.value === 0 ? "yes" : "no", "yes");
   want("white sky is white at the top",
        skyMat.uniforms.topColor.value.getHexString() === "ffffff" ? "yes" : "no", "yes");
+
+  // ქალაქი reads the same SC.light but drives its own rig, and it must keep
+  // doing so while the modelling scene is in the grey studio — the city panel
+  // is reachable from there in one click.
+  SC.light.mode = "natural"; SC.light.sun = 0.8; SC.light.el = 40;
+  SC.env = "basic";
+  SC.light.az = 90; applyLighting();
+  want("the city sun swings east with the slider",
+       sun.position.x > 900 && Math.abs(sun.position.z) < 1 ? "yes" : "no", "yes");
+  SC.light.az = 270; applyLighting();
+  want("and west again", sun.position.x < -900 ? "yes" : "no", "yes");
+  want("the city sun keeps the distance its shadow camera was built for",
+       Math.round(sun.position.length()), 1600);
+  want("the city sun tracks the slider too", sun.intensity.toFixed(2), "0.80");
+  SC.light.sun = 0; applyLighting();
+  want("a dimmed city sun stops casting shadow", sun.castShadow ? "yes" : "no", "no");
+  SC.light.sun = 0.8; SC.light.mode = "white"; applyLighting();
+  var cbg = scene.background.getHexString();
+  SC.light.mode = "natural"; applyLighting();
+  want("the city sky answers the ცა buttons",
+       cbg !== scene.background.getHexString() ? "yes" : "no", "yes");
+  SC.env = "school";
+
+  // Both panels render the same two sections, and neither steals the other's
+  // ids: the hidden one keeps its markup, so a clash would move the wrong sun.
+  cityRenderVL(); schRenderPanel();      // both on screen at once, as they are in the DOM
+  want("ქალაქი carries ხედი and განათება",
+       document.getElementById("sideCityVL").querySelectorAll("section").length, 2);
+  want("neither panel's sliders are duplicated",
+       document.querySelectorAll("#lAz").length + "/" + document.querySelectorAll("#clAz").length,
+       "1/1");
+
   SC.light = savedL; SC.env = savedEnv; applyLighting();
 
   // ---- inset --------------------------------------------------------------
