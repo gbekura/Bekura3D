@@ -64,7 +64,7 @@ To rebuild the ground textures from source (needs internet):
 
     bash data/make-maps.sh
 
-`?selftest=1` runs 156 assertions in the page and prints the results over it. Run it
+`?selftest=1` runs 185 assertions in the page and prints the results over it. Run it
 before shipping a build, and run it on `bekura3d.html` rather than on `app.html`:
 the bundle is what students open, and three of the assertions need the ground
 textures that only the bundle carries inline.
@@ -100,6 +100,38 @@ pitches or rolls, because every object here is draped on terrain. A mass carries
 about their own centre, so the angle can be read back and typed even where there is no mesh to
 turn. Dragging shows the running figure in the hint bar together with the size it has reached, so
 a team sizing a zone reads hectares while they drag rather than after.
+
+**Several objects at once.** <kbd>Ctrl</kbd>+click adds an object to the selection and
+<kbd>Ctrl</kbd>+clicking a selected one takes it out again; a plain click still replaces the whole
+set. Everything then works on the set: the gizmo moves, turns and sizes all of it, dragging any
+member carries the rest, <kbd>Delete</kbd> takes them all and <kbd>Ctrl</kbd>+<kbd>D</kbd>
+duplicates them together. The panel says how many are selected.
+
+A group turns and scales about **the centre of the selection**, so each member spins on its own
+axis *and* its centre orbits that shared point. That is the only answer that makes a group behave
+like one object; turning each about its own centre instead looks like a bug, because five
+buildings pirouette and the block never moves.
+
+Under <kbd>Ctrl</kbd> the gizmo stops accepting clicks, deliberately. It stands in the middle of
+the selection at a constant size on screen, so it covers the very objects a student is trying to
+<kbd>Ctrl</kbd>+click out of the set, and every one of those clicks would otherwise grab a handle.
+
+**Copy between tabs.** <kbd>Ctrl</kbd>+<kbd>C</kbd> and <kbd>Ctrl</kbd>+<kbd>V</kbd> (also **ასლი**
+and **ჩასმა** in the ფაილი menu) carry a selection from one tab to another — build a block in
+საბაზისო, paste it onto Telavi. Every tab is in real metres, so the geometry crosses unchanged and
+only the wrapper is rebuilt, because the two halves describe an object differently:
+
+| | how an object is held |
+|---|---|
+| studio | `{ kind: "box", pos, V, F, legend, seg, shade, rot }` |
+| city | `{ kind: "shape", prim: "box", type: <zone>, pos, V, F, seg, shade, rot }` |
+
+A city mass is a width/depth/height rather than a mesh, so it is baked into a box on the way into
+the studio. A zoning area or a path is a ring of ground coordinates with no studio equivalent at
+all: those are **refused by name** rather than pasted as something they are not, and the hint bar
+says how many did not cross. The paste lands centred on whatever the camera is looking at, keeping
+the group's own arrangement — the school plot is 150 m across and a town is 1,800, so the
+coordinates it was copied from would drop it off the edge of the world half the time.
 
 **And every transform can be typed.** With something selected, the panel on the right opens with
 three rows of numbers — **ადგილი**, **ბრუნვა**, **ზომა** — X, Y and Z in the colours of the
@@ -218,6 +250,11 @@ trade to revisit if the classroom machines turn out to have room for it.
   to cut away with, you get the first minus the second (an arch, a notch, a doorway). The
   result is a static mesh (no more segment slider), which you can keep shaping with the poly
   tools. Runs on a small inlined CSG engine (csg.js, MIT); no library download.
+- **Undo / redo, on buttons as well as keys.** The **⟲ ⟳** pair sits beside **ფაილი** in the
+  header and greys out when there is nothing left on that side of the stack — which the
+  shortcut can never tell you. They also work where the shortcut does not: `Ctrl+Z` reaches
+  the page only while the focus is outside a text field, and after typing a plan name or a
+  transform figure it is inside one.
 - **Undo / redo.** `Ctrl+Z` undoes, `Ctrl+Y` (or `Ctrl+Shift+Z`) redoes, up to 80 steps,
   across all three tabs.
 - **Colour by legend, and name the colour.** The six swatches carry the exact colours from the
@@ -279,8 +316,10 @@ site they have used, the number that makes them argue about density instead of g
 | Pan | middle drag, or Shift + drag |
 | Zoom | wheel |
 | Finish a path | `Enter`, or double-click |
-| Delete selected | `Delete` |
-| Undo / redo | `Ctrl+Z` / `Ctrl+Y` |
+| Add to / remove from the selection | `Ctrl` + click |
+| Delete selected | `Delete` (takes the whole selection) |
+| Copy / paste, across tabs | `Ctrl+C` / `Ctrl+V`, or ასლი / ჩასმა in ფაილი |
+| Undo / redo | `Ctrl+Z` / `Ctrl+Y`, or the **⟲ ⟳** buttons beside ფაილი |
 | Shade menu | right-click a shape (no drag) |
 | Move / rotate / scale gizmo | `W` / `E` / `R` (school tab) |
 

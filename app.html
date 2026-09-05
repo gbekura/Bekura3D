@@ -344,6 +344,12 @@
     <div id="filemenu">
       <button class="ghost" id="filebtn" title="ფაილის მოქმედებები">ფაილი ▾</button>
       <div id="filepop">
+        <!-- Copy and paste carry objects between tabs, so they are the one pair
+             a student cannot discover from the rail, which is per-tab. Buttons
+             as well as the shortcut, for the same reason as undo: the keyboard
+             never reaches the page while the focus is in a panel field. -->
+        <button class="ghost" id="copyb" title="მონიშნული ობიექტები ბუფერში">ასლი<span class="sk">Ctrl+C</span></button>
+        <button class="ghost" id="pasteb" title="ბუფერიდან ამ ჩანართში">ჩასმა<span class="sk">Ctrl+V</span></button>
         <button class="ghost" id="shot">სურათი</button>
         <button class="ghost" id="save">შენახვა<span class="sk">Ctrl+S</span></button>
         <button class="ghost" id="open">გახსნა<span class="sk">Ctrl+O</span></button>
@@ -2640,6 +2646,158 @@ function schGroupScale(ids, axisId, k, p) {
   });
 }
 
+// ---------------------------------------------------------------- clipboard
+// Copy in one tab, paste in another. Everything in this app is in real metres,
+// so a 24 m block built in საბაზისო is the same 24 m block when it lands on
+// Telavi — the geometry crosses unchanged and only the wrapper around it has to
+// be rebuilt, because the two halves describe an object differently:
+//
+//   studio   { kind: "box", pos, V, F, legend, seg, shade, rot }
+//   city     { kind: "shape", prim: "box", type: <zone>, pos, V, F, seg, shade, rot }
+//
+// A mass (kind "zone") is a width/depth/height rather than a mesh, so it is
+// baked into a box on the way into the studio. An area or a path is a ring of
+// ground coordinates with no studio equivalent at all; those are refused by
+// name rather than pasted as something they are not.
+var CLIP_KEY = "bekura3d-clip";
+var CLIP = { src: null, items: [] };
+
+function clipSave() {
+  try { localStorage.setItem(CLIP_KEY, JSON.stringify(CLIP)); } catch (e) { }
+}
+(function clipLoad() {
+  try {
+    var t = localStorage.getItem(CLIP_KEY);
+    if (t) { var o = JSON.parse(t); if (o && o.items) CLIP = o; }
+  } catch (e) { }
+})();
+
+function clipCount() { return CLIP.items ? CLIP.items.length : 0; }
+
+// ---- copy ----------------------------------------------------------------
+function doCopy() {
+  var n = 0;
+  if (isCity()) {
+    var ids = citySelIds();
+    CLIP = { src: "city", items: [] };
+    ids.forEach(function (id) {
+      var it = findItem(id);
+      if (it) { CLIP.items.push(JSON.parse(JSON.stringify(it))); n++; }
+    });
+  } else {
+    var sids = schSelIds();
+    CLIP = { src: "studio", items: [] };
+    sids.forEach(function (id) {
+      var sh = schFind(id);
+      if (sh) { CLIP.items.push(JSON.parse(JSON.stringify(sh))); n++; }
+    });
+  }
+  clipSave();
+  document.getElementById("hint").innerHTML = n
+    ? "<b>" + n + "</b> ობიექტი დაკოპირდა. გადადი სხვა ჩანართზე და დააჭირე <kbd>Ctrl</kbd>+<kbd>V</kbd>."
+    : "ჯერ მონიშნე ობიექტი. <kbd>Ctrl</kbd>+დაწკაპუნება რამდენიმეს ნიშნავს.";
+  return n;
+}
+
+// Where a copied object sits in its own group, so the arrangement survives the
+// journey: offsets are kept and only the group's centre is moved to the view.
+function clipCentre() {
+  var sx = 0, sz = 0, n = 0;
+  CLIP.items.forEach(function (o) {
+    var c = CLIP.src === "city" ? cityCentroid(o) : { x: o.pos[0], z: o.pos[2] };
+    sx += c.x; sz += c.z; n++;
+  });
+  return n ? { x: sx / n, z: sz / n } : { x: 0, z: 0 };
+}
+
+// ---- the two converters --------------------------------------------------
+// Returns null for anything with no honest equivalent on the other side.
+function clipToStudio(o, src) {
+  var g, kind = "box";
+  if (src === "studio") { g = { V: o.V, F: o.F }; kind = o.kind; }
+  else if (o.kind === "shape") { g = { V: o.V, F: o.F }; kind = o.prim || "box"; }
+  else if (o.kind === "zone") { g = pBox(o.w, o.h, o.d); kind = "box"; }
+  else return null;                                   // area, path
+  return { id: SC.nextId++, kind: kind, name: o.name || "",
+           legend: (src === "studio" && o.legend) ? o.legend : SC.paintId,
+           pos: [0, 0, 0],
+           V: JSON.parse(JSON.stringify(g.V)), F: JSON.parse(JSON.stringify(g.F)),
+           seg: o.seg || 0, shade: o.shade || "flat",
+           rot: (src === "studio" && o.rot) ? o.rot.slice() : [0, 0, 0] };
+}
+
+function clipToCity(o, src) {
+  if (src === "city") {
+    var c = JSON.parse(JSON.stringify(o));
+    c.id = state.nextId++;
+    return c;                                         // every city kind crosses
+  }
+  return { id: state.nextId++, kind: "shape", prim: o.kind === "mesh" ? "box" : o.kind,
+           type: state.selected != null && findItem(state.selected)
+                 ? findItem(state.selected).type : ZONES[0].id,
+           pos: [0, 0, 0],
+           V: JSON.parse(JSON.stringify(o.V)), F: JSON.parse(JSON.stringify(o.F)),
+           seg: o.seg || 0, shade: o.shade || "flat", rot: 0 };
+}
+
+// ---- paste ---------------------------------------------------------------
+// The group lands centred on what the camera is looking at, not at the
+// coordinates it was copied from: the school plot is 150 m across and a town is
+// 1,800, so the original numbers would drop a paste off the edge of the world
+// half the time.
+function doPaste() {
+  if (!clipCount()) {
+    document.getElementById("hint").textContent = "ბუფერი ცარიელია — ჯერ დააკოპირე (Ctrl+C).";
+    return 0;
+  }
+  var t = activeOrbit().target, c0 = clipCentre(), made = [], skipped = 0;
+  if (isCity()) {
+    CLIP.items.forEach(function (o) {
+      var it = clipToCity(o, CLIP.src);
+      if (!it) { skipped++; return; }
+      var here = CLIP.src === "city" ? cityCentroid(o) : { x: o.pos[0], z: o.pos[2] };
+      var dx = t.x + (here.x - c0.x), dz = t.z + (here.z - c0.z);
+      if (it.pts) {
+        var oc = cityCentroid(it);
+        it.pts = it.pts.map(function (q) { return [q[0] + dx - oc.x, q[1] + dz - oc.z]; });
+      } else if (it.kind === "zone") { it.x = dx; it.z = dz; }
+      else { it.pos[0] = dx; it.pos[1] = 0; it.pos[2] = dz; }
+      items().push(it);
+      made.push(it.id);
+    });
+    if (made.length) {
+      rebuild();
+      select(made[made.length - 1]);
+      state.selMore = made.slice(0, -1);
+      markSelected(); buildHandles(); renderProps();
+      save();
+    }
+  } else {
+    CLIP.items.forEach(function (o) {
+      var sh = clipToStudio(o, CLIP.src);
+      if (!sh) { skipped++; return; }
+      var here = CLIP.src === "city" ? cityCentroid(o) : { x: o.pos[0], z: o.pos[2] };
+      sh.pos[0] = t.x + (here.x - c0.x);
+      sh.pos[2] = t.z + (here.z - c0.z);
+      sh.pos[1] = CLIP.src === "studio" ? (o.pos[1] || 0) : 0;
+      schItems().push(sh);
+      made.push(sh.id);
+    });
+    if (made.length) {
+      schRebuild();
+      schSelect(made[made.length - 1], null);
+      SC.selMore = made.slice(0, -1);
+      schRefreshHelpers(); schRenderPanel();
+      schSave();
+    }
+  }
+  document.getElementById("hint").innerHTML =
+    "<b>" + made.length + "</b> ობიექტი ჩაისვა" +
+    (skipped ? ". <b>" + skipped + "</b> ვერ ჩაისვა — ზონის კონტური და ბილიკი " +
+               "მხოლოდ ქალაქში არსებობს." : ".");
+  return made.length;
+}
+
 // ---------------------------------------------------------------- transform type-in
 // The gizmo answers "drag it until it looks right". This answers "put it at
 // 12 metres", which is the question a plan asks. Both halves of the app get the
@@ -3602,6 +3760,9 @@ document.getElementById("undoBtn").addEventListener("click", function () { undo(
 document.getElementById("redoBtn").addEventListener("click", function () { redo(); });
 histButtons();                       // start greyed out: nothing has happened yet
 
+document.getElementById("copyb").addEventListener("click", function () { doCopy(); });
+document.getElementById("pasteb").addEventListener("click", function () { doPaste(); });
+
 // One download path for every export in the app. Two things here are
 // load-bearing, and სურათი used to have neither: the anchor has to be **in the
 // document** when it is clicked, and the payload has to be a **blob** rather
@@ -3653,6 +3814,10 @@ window.addEventListener("keydown", function (ev) {
     var kk = (ev.key || "").toLowerCase();
     if (kk === "z" && !ev.shiftKey) { ev.preventDefault(); undo(); return; }
     if ((kk === "z" && ev.shiftKey) || kk === "y") { ev.preventDefault(); redo(); return; }
+    // Copy here, paste in another tab. Ctrl+D is the in-place duplicate and is
+    // handled further down; these two are the ones that cross a tab boundary.
+    if (kk === "c") { ev.preventDefault(); doCopy(); return; }
+    if (kk === "v") { ev.preventDefault(); doPaste(); return; }
   }
   if (!isCity()) {
     if ((ev.key === "Delete" || ev.key === "Backspace") && SC.sel != null) {
@@ -6624,7 +6789,9 @@ if (/[?&]debug=1/.test(location.search)) {
                       select: select, renderProps: renderProps, schRenderPanel: schRenderPanel,
                       citySelIds: citySelIds, schSelIds: schSelIds,
                       citySelPivot: citySelPivot, schSelPivot: schSelPivot,
-                      canUndo: canUndo, canRedo: canRedo, camera: function () { return camera; } };
+                      canUndo: canUndo, canRedo: canRedo, camera: function () { return camera; },
+                      clipCount: clipCount, doCopy: doCopy, doPaste: doPaste,
+                      pBox: pBox, schFind: schFind, findItem: findItem };
 }
 
 // ?selftest=1 asserts pan direction. Panning is grab-the-world: the ground must
@@ -7337,6 +7504,42 @@ if (/[?&]selftest=1/.test(location.search)) {
        Math.abs(q1.pos[0] - 10) < 0.001 ? "yes" : "no", "yes");
   SC.sel = _ss0; SC.selMore = _sm1; SC.sub = _sb0;
   for (var si = sbag.length - 1; si >= 0; si--) if (sbag[si].id === -91 || sbag[si].id === -92) sbag.splice(si, 1);
+
+  // ---- clipboard across tabs ---------------------------------------------
+  // Metres are metres in every tab, so the geometry must cross untouched; only
+  // the wrapper around it is rebuilt.
+  var _clip0 = CLIP;
+  var studioBox = { id: -95, kind: "box", pos: [3, 0, 4], legend: "bld", seg: 0, shade: "flat",
+                    V: pBox(24, 10, 16).V, F: pBox(24, 10, 16).F, rot: [0, 0, 30] };
+  CLIP = { src: "studio", items: [JSON.parse(JSON.stringify(studioBox))] };
+  var intoCity = clipToCity(CLIP.items[0], "studio");
+  want("a studio shape becomes a city primitive", intoCity.kind, "shape");
+  want("and keeps the shape it was", intoCity.prim, "box");
+  want("and its geometry crosses untouched", intoCity.V.length, studioBox.V.length);
+  want("a pasted city object gets a zone", !!intoCity.type, true);
+
+  var cityMass = { id: -96, kind: "zone", type: "sacx", x: 0, z: 0, w: 20, d: 12, h: 9, rot: 0 };
+  var intoStudio = clipToStudio(cityMass, "city");
+  want("a city mass becomes a studio box", intoStudio.kind, "box");
+  var mb = bboxOf(intoStudio.V);
+  want("the mass keeps its width", Math.round(mb.hi[0] - mb.lo[0]), 20);
+  want("the mass keeps its height", Math.round(mb.hi[1] - mb.lo[1]), 9);
+  want("the mass keeps its depth", Math.round(mb.hi[2] - mb.lo[2]), 12);
+
+  // A ring of ground coordinates has no studio equivalent and must be refused
+  // rather than pasted as something it is not.
+  want("a zoning area cannot cross into the studio",
+       clipToStudio({ id: -97, kind: "area", pts: [[0,0],[5,0],[5,5]] }, "city"), null);
+  want("a path cannot either",
+       clipToStudio({ id: -98, kind: "path", pts: [[0,0],[9,0]], width: 8 }, "city"), null);
+
+  // The arrangement of a group survives the journey: offsets are kept and only
+  // the centre is moved.
+  CLIP = { src: "studio", items: [
+    { id: -99, kind: "box", pos: [0, 0, 0], V: pBox(2,2,2).V, F: pBox(2,2,2).F },
+    { id: -100, kind: "box", pos: [10, 0, 0], V: pBox(2,2,2).V, F: pBox(2,2,2).F } ] };
+  want("the copied group's centre is between them", clipCentre().x, 5);
+  CLIP = _clip0;
 
   // ---- undo / redo buttons ----------------------------------------------
   // The buttons exist because Ctrl+Z never reaches the page while the focus is
