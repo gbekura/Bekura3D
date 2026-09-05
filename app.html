@@ -3274,12 +3274,48 @@ document.getElementById("ctxbtn").addEventListener("click", function () {
   refreshContext(); save();
 });
 
+// One download path for every export in the app. Two things here are
+// load-bearing, and სურათი used to have neither: the anchor has to be **in the
+// document** when it is clicked, and the payload has to be a **blob** rather
+// than a data: URL. A detached anchor carrying a 130 KB data: URL is the one
+// combination Chrome drops on the floor without an error, which is why the two
+// JSON exports downloaded and the photo silently did nothing.
+function downloadBlob(blob, name) {
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+// The file is named after what is actually on the screen. The old name read the
+// town and the variant whatever the tab, so a school plan came out called
+// bekura3d-telavi-A.png — a city that is not in the picture.
+function shotName() {
+  var base;
+  if (isCity()) base = state.town + "-" + state.variant;
+  else base = (SC.planName || SC.activeDoc || "") .replace(/[^\p{L}\p{N}_-]+/gu, "-").slice(0, 40)
+              + "-" + (SC.variant || "A");
+  return "bekura3d-" + (base.replace(/^-+/, "") || "shot") + ".png";
+}
+
 document.getElementById("shot").addEventListener("click", function () {
   renderer.render(!isCity() ? SC.scene : scene, camera);
-  var a = document.createElement("a");
-  a.download = "bekura3d-" + state.town + "-" + state.variant + ".png";
-  a.href = renderer.domElement.toDataURL("image/png");
-  a.click();
+  var cv = renderer.domElement, name = shotName();
+  function done() {
+    document.getElementById("hint").innerHTML =
+      "სურათი ჩამოიტვირთა: <b>" + name + "</b>. თუ ბრაუზერმა არ გკითხა სად შეინახოს, " +
+      "ის ჩამოტვირთვების საქაღალდეშია.";
+  }
+  // toBlob reads the canvas at the moment it is called, so the render above is
+  // still what gets written even though the callback arrives later.
+  if (cv.toBlob) { cv.toBlob(function (b) { if (b) { downloadBlob(b, name); done(); } }, "image/png"); return; }
+  var url = cv.toDataURL("image/png"), bin = atob(url.split(",")[1]);
+  var buf = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  downloadBlob(new Blob([buf], { type: "image/png" }), name);
+  done();
 });
 
 window.addEventListener("keydown", function (ev) {
@@ -5895,12 +5931,7 @@ function schExport() {
                           mapWhite: state.mapWhite } };
   var base = (SC.planName || "bekura3d").replace(/[^\p{L}\p{N}_-]+/gu, "-").slice(0, 40);
   var blob = new Blob([writePayload("bekura3d-file", payload)], { type: "application/json" });
-  var a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = (base || "bekura3d") + ".bekura3d.json";
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  downloadBlob(blob, (base || "bekura3d") + ".bekura3d.json");
 }
 
 // Everything the app holds, in one object: both halves, every town, every
@@ -5926,12 +5957,7 @@ function writeDataFile() {
   var body = "// Bekura3D — მონაცემები. დადე ეს ფაილი bekura3d.html-ის გვერდით.\n" +
              "window.BEKURA3D_DATA = " + JSON.stringify(fullPayload()) + ";\n";
   var blob = new Blob([body], { type: "text/javascript" });
-  var a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "bekura3d-data.js";
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  downloadBlob(blob, "bekura3d-data.js");
   document.getElementById("hint").innerHTML =
     "მონაცემები ჩამოიტვირთა. დადე <b>bekura3d-data.js</b> პროგრამის გვერდით, " +
     "და ის ყოველ გახსნაზე წაიკითხება.";
@@ -6855,6 +6881,19 @@ if (/[?&]selftest=1/.test(location.search)) {
   cityXformSet(cz, "size", 1, 50);
   want("a typed depth is taken literally", cz.d, 50);
   want("a zero size is refused", cityXformSet(cz, "size", 1, 0), false);
+
+  // ---- სურათი ------------------------------------------------------------
+  // The photo is named after what is in it. This used to read the town and the
+  // variant whatever the tab, so a school plan came out named after a city that
+  // was not in the picture.
+  var keepTab = state.tab, keepPN = SC.planName, keepVar = SC.variant, keepDoc = SC.activeDoc;
+  state.tab = "city"; state.town = "telavi"; state.variant = "B";
+  want("a city photo is named for the town", shotName(), "bekura3d-telavi-B.png");
+  state.tab = "school"; SC.activeDoc = "school"; SC.variant = "A"; SC.planName = "";
+  want("a studio photo is not named for a city", shotName(), "bekura3d-school-A.png");
+  SC.planName = "ჩვენი სკოლა";
+  want("a named plan names its own photo", shotName(), "bekura3d-ჩვენი-სკოლა-A.png");
+  state.tab = keepTab; SC.planName = keepPN; SC.variant = keepVar; SC.activeDoc = keepDoc;
 
   } catch (e) {
     out.push("ERR  " + (e && e.stack ? e.stack.split("\n")[0] : e));

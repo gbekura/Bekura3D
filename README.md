@@ -64,7 +64,7 @@ To rebuild the ground textures from source (needs internet):
 
     bash data/make-maps.sh
 
-`?selftest=1` runs 153 assertions in the page and prints the results over it. Run it
+`?selftest=1` runs 156 assertions in the page and prints the results over it. Run it
 before shipping a build, and run it on `bekura3d.html` rather than on `app.html`:
 the bundle is what students open, and three of the assertions need the ground
 textures that only the bundle carries inline.
@@ -246,6 +246,16 @@ trade to revisit if the classroom machines turn out to have room for it.
 | Day 2, რუკა ენაა / მასტერპლანის ვორქშოპი | **გეგმა** view: zones, paths, an automatic legend with real areas in m². The digital version of the paper masterplan. |
 | Block 2, დიდი მასშტაბის სივრცის 3D მოდელირება | **3D** view: მოცულობები, ბილიკები, დიდი მასები, exactly the three things the block names. |
 | Block 4, AI ვიზუალიზაცია | **სურათი** exports a PNG of the current view, ready to feed the AI image tool. |
+
+**სურათი names the file after what is in the picture** — `bekura3d-telavi-B.png` from ქალაქი,
+`bekura3d-ჩვენი-სკოლა-A.png` from a named plan in the studio. Most browsers save it straight to
+the downloads folder without asking; the hint bar names the file so a team knows what to look
+for. All three exports (**სურათი**, **შენახვა**, **მონაცემები**) go out through one
+`downloadBlob` helper, and the two rules it exists to enforce are worth knowing before anyone
+"simplifies" it: the anchor must be **in the document** when it is clicked, and the payload must
+be a **blob**, not a `data:` URL. A detached anchor holding a large `data:` URL is dropped by
+Chrome without an error — which is exactly how სურათი once produced no file at all while the two
+JSON exports beside it worked.
 
 ## What students do
 
