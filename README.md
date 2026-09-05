@@ -64,7 +64,7 @@ To rebuild the ground textures from source (needs internet):
 
     bash data/make-maps.sh
 
-`?selftest=1` runs 185 assertions in the page and prints the results over it. Run it
+`?selftest=1` runs 195 assertions in the page and prints the results over it. Run it
 before shipping a build, and run it on `bekura3d.html` rather than on `app.html`:
 the bundle is what students open, and three of the assertions need the ground
 textures that only the bundle carries inline.
@@ -250,6 +250,21 @@ trade to revisit if the classroom machines turn out to have room for it.
   to cut away with, you get the first minus the second (an arch, a notch, a doorway). The
   result is a static mesh (no more segment slider), which you can keep shaping with the poly
   tools. Runs on a small inlined CSG engine (csg.js, MIT); no library download.
+
+  **Every shape has to be a solid wound outward for this to work**, and that is worth knowing
+  before anyone touches the primitive builders. csg.js tells inside from outside using each
+  polygon's own plane, so a shape whose faces wind inward has every one of those tests reversed
+  and გამოკლება returns nonsense rather than failing — no error, just a wrong mesh.
+
+  The primitives are all built inward and put right afterwards by `orientFaces`, which points
+  each face away from the shape's centroid. That is a convexity assumption, and **the torus
+  breaks it**: its centroid sits in the hole, where the inner faces of the ring correctly point
+  *towards* it. So the torus is skipped, and until this was found it was the one primitive left
+  inverted — which is why `torus − box` quietly produced rubbish. It is now born with the right
+  winding instead, and `shapeToCSG` checks the signed volume and turns any inward solid round on
+  the way in, so a torus already saved in a student's browser by an older build still cuts
+  correctly. `?selftest=1` asserts that every primitive is a solid wound outward and that each
+  one actually loses material when it is cut.
 - **Undo / redo, on buttons as well as keys.** The **⟲ ⟳** pair sits beside **ფაილი** in the
   header and greys out when there is nothing left on that side of the stack — which the
   shortcut can never tell you. They also work where the shortcut does not: `Ctrl+Z` reaches

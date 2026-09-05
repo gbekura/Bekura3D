@@ -4066,7 +4066,13 @@ function pTorus(R, r, n, m) {
   var F = [];
   for (var i = 0; i < n; i++) for (var j = 0; j < m; j++) {
     var i2 = (i + 1) % n, j2 = (j + 1) % m;
-    F.push([grid[i][j], grid[i2][j], grid[i2][j2], grid[i][j2]]);
+    // Wound outward. Every other primitive is built inward and put right by
+    // orientFaces afterwards, but orientFaces points each face away from the
+    // shape's centroid — and a torus's centroid sits in the hole, where the
+    // inner faces of the ring correctly point *towards* it. So the torus is the
+    // one primitive that has to be born with the right winding, and the one
+    // that must never be handed to orientFaces.
+    F.push([grid[i][j], grid[i][j2], grid[i2][j2], grid[i2][j]]);
   }
   return { V: V, F: F };
 }
@@ -5075,13 +5081,36 @@ CNode.prototype = {
   }
 };
 
+// Signed volume of a closed mesh. Positive when the faces wind outward, which
+// is the whole question csg.js cares about.
+function shapeVolume(V, F) {
+  var s = 0;
+  for (var i = 0; i < F.length; i++) {
+    var f = F[i];
+    for (var t = 1; t < f.length - 1; t++) {
+      var a = V[f[0]], b = V[f[t]], c = V[f[t + 1]];
+      s += (a[0] * (b[1]*c[2] - b[2]*c[1]) -
+            a[1] * (b[0]*c[2] - b[2]*c[0]) +
+            a[2] * (b[0]*c[1] - b[1]*c[0])) / 6;
+    }
+  }
+  return s;
+}
+
 function shapeToCSG(sh) {
   var polys = [];
+  // csg.js tells inside from outside using each polygon's own plane, so a solid
+  // wound inward has every one of those tests reversed and subtract returns
+  // nonsense rather than failing. Turning it right way round here rather than at
+  // the source also rescues shapes already saved in a student's browser by a
+  // build that wrote them the wrong way — the torus, for the whole of this
+  // program's life until now.
+  var flip = shapeVolume(sh.V, sh.F) < 0;
   for (var fi = 0; fi < sh.F.length; fi++) {
     var f = sh.F[fi], n = faceNormal(sh.V, f);
-    var nv = new CVec(n[0], n[1], n[2]);
+    var nv = new CVec(flip ? -n[0] : n[0], flip ? -n[1] : n[1], flip ? -n[2] : n[2]);
     for (var t = 1; t < f.length - 1; t++) {            // triangles are always planar
-      var idx = [f[0], f[t], f[t + 1]];
+      var idx = flip ? [f[0], f[t + 1], f[t]] : [f[0], f[t], f[t + 1]];
       var verts = idx.map(function (vi) {
         var v = sh.V[vi];
         return new CVert(new CVec(v[0] + sh.pos[0], v[1] + sh.pos[1], v[2] + sh.pos[2]), nv.clone());
@@ -6791,7 +6820,9 @@ if (/[?&]debug=1/.test(location.search)) {
                       citySelPivot: citySelPivot, schSelPivot: schSelPivot,
                       canUndo: canUndo, canRedo: canRedo, camera: function () { return camera; },
                       clipCount: clipCount, doCopy: doCopy, doPaste: doPaste,
-                      pBox: pBox, schFind: schFind, findItem: findItem };
+                      pBox: pBox, schFind: schFind, findItem: findItem,
+                      makePrim: makePrim, shapeToCSG: shapeToCSG, csgToShape: csgToShape,
+                      faceNormal: faceNormal, orientFaces: orientFaces };
 }
 
 // ?selftest=1 asserts pan direction. Panning is grab-the-world: the ground must
@@ -7504,6 +7535,58 @@ if (/[?&]selftest=1/.test(location.search)) {
        Math.abs(q1.pos[0] - 10) < 0.001 ? "yes" : "no", "yes");
   SC.sel = _ss0; SC.selMore = _sm1; SC.sub = _sb0;
   for (var si = sbag.length - 1; si >= 0; si--) if (sbag[si].id === -91 || sbag[si].id === -92) sbag.splice(si, 1);
+
+  // ---- winding, and the boolean that depends on it -----------------------
+  // Every primitive has to stand up as a solid wound outward. csg.js decides
+  // inside from outside from those planes, so an inverted one makes subtract
+  // return nonsense rather than fail — which is how the torus went wrong
+  // unnoticed: orientFaces points each face away from the centroid, a torus's
+  // centroid is in the hole, so the torus is skipped and had to be born right.
+  var badWind = "";
+  ["box", "pyramid", "cone", "cylinder", "sphere", "torus"].forEach(function (k) {
+    var p = makePrim(k, undefined);
+    if (k !== "torus") orientFaces(p);
+    if (shapeVolume(p.V, p.F) <= 0) badWind += (badWind ? "," : "") + k;
+  });
+  want("every primitive is a solid wound outward", badWind || "none", "none");
+
+  var torusV = makePrim("torus", undefined);
+  want("the torus is close to 2*pi^2*R*r^2",
+       Math.abs(shapeVolume(torusV.V, torusV.F) - 2 * Math.PI * Math.PI * 12 * 16) < 400
+       ? "yes" : "no", "yes");
+
+  // A cut has to remove material: less than we started with, and still a solid.
+  function cutTest(k) {
+    var p = makePrim(k, undefined);
+    if (k !== "torus") orientFaces(p);
+    var a = { id: -60, kind: k, pos: [0, 0, 0],
+              V: JSON.parse(JSON.stringify(p.V)), F: JSON.parse(JSON.stringify(p.F)) };
+    var v0 = shapeVolume(a.V, a.F);
+    // A slab reaching up to y = 4, which is inside every primitive (they stand
+    // on the ground and are 8 to 16 m tall), so each one loses its underside
+    // and none is wiped out completely.
+    var bx = pBox(60, 64, 60); orientFaces(bx);
+    var b = { id: -61, kind: "box", pos: [0, -60, 0], V: bx.V, F: bx.F };
+    if (!schSubtract(a, b)) return "refused";
+    var v1 = shapeVolume(a.V, a.F);
+    if (!(v1 > 0)) return "inside out";
+    if (!(v1 < v0 - 0.01)) return "nothing removed";
+    return "ok";
+  }
+  ["box", "pyramid", "cone", "cylinder", "sphere", "torus"].forEach(function (k) {
+    want("subtract cuts a " + k, cutTest(k), "ok");
+  });
+
+  // An older build wrote its toruses inward. Those are in students' browsers,
+  // so the CSG bridge has to right them on the way in rather than trusting them.
+  var oldT = makePrim("torus", undefined);
+  oldT.F.forEach(function (f) { f.reverse(); });          // as an old file holds it
+  want("a torus saved by an older build is inverted", shapeVolume(oldT.V, oldT.F) < 0, true);
+  var oa = { id: -62, kind: "torus", pos: [0, 0, 0], V: oldT.V, F: oldT.F };
+  var ob = pBox(60, 64, 60); orientFaces(ob);
+  want("...and still cuts correctly",
+       schSubtract(oa, { id: -63, kind: "box", pos: [0, -60, 0], V: ob.V, F: ob.F }) &&
+       shapeVolume(oa.V, oa.F) > 0 ? "yes" : "no", "yes");
 
   // ---- clipboard across tabs ---------------------------------------------
   // Metres are metres in every tab, so the geometry must cross untouched; only
