@@ -52,6 +52,11 @@
               font-size:14px;padding:7px 14px;border-radius:7px;cursor:pointer;
               transition:background .15s ease,color .15s ease}
   .seg button:hover{background:rgba(255,255,255,.10);color:#fff}
+  /* The two history buttons are actions, not a toggle pair: bigger glyphs, and
+     dead when the stack has nothing on that side. */
+  #histseg button{font-size:16px;line-height:1;padding:5px 9px}
+  #histseg button[disabled]{opacity:.3;cursor:default}
+  #histseg button[disabled]:hover{background:none;color:rgba(255,255,255,.62)}
   .seg button.on{background:var(--cyan);color:var(--navy-3);font-weight:700;
                  box-shadow:0 2px 10px rgba(51,190,196,.32)}
   .seg button.on:hover{background:#4ad0d6}
@@ -328,6 +333,15 @@
     </div>
     <div class="spacer"></div>
     <button class="ghost on" id="ctxbtn">შენობები</button>
+    <!-- Ctrl+Z reaches the page only when the focus is not in a field, and after
+         typing in the panel it usually is. Two buttons work from anywhere, and
+         they grey out when there is nothing left to undo, which the shortcut
+         could never tell you. Icons only: the header wrapped onto a second row
+         once already and is not getting wider. -->
+    <div class="seg" id="histseg">
+      <button id="undoBtn" title="დაბრუნება (Ctrl+Z)" aria-label="დაბრუნება">⟲</button>
+      <button id="redoBtn" title="გამეორება (Ctrl+Y)" aria-label="გამეორება">⟳</button>
+    </div>
     <div id="filemenu">
       <button class="ghost" id="filebtn" title="ფაილის მოქმედებები">ფაილი ▾</button>
       <div id="filepop">
@@ -633,9 +647,10 @@ var HINTS = {
   prim:   "დააწკაპუნე რუკაზე ფიგურის დასადგმელად. მერე გადაატრიალე და გაწიე " +
           "ტრანსფორმის ღილაკებით.",
   path:   "დააწკაპუნე წერტილებზე ბილიკის დასახატად. დასრულება — <kbd>Enter</kbd> ან ორმაგი დაწკაპუნება.",
-  select: "დააწკაპუნე ობიექტზე მოსანიშნად, გადაათრიე გადასატანად. ზონის კუთხეზე დაწკაპუნება " +
-          "აჩენს ისრებს, შუა წერტილი ამატებს ახალს. მონიშნულ კუთხეს <kbd>Delete</kbd> შლის, " +
-          "სხვა შემთხვევაში — მთელ ობიექტს.",
+  select: "დააწკაპუნე ობიექტზე მოსანიშნად, გადაათრიე გადასატანად. <kbd>Ctrl</kbd>+დაწკაპუნება " +
+          "ამატებს ან აკლებს მონიშვნას — რამდენიმე ობიექტი ერთად გადადის, ბრუნავს და იზრდება. " +
+          "ზონის კუთხეზე დაწკაპუნება აჩენს ისრებს, შუა წერტილი ამატებს ახალს. მონიშნულ კუთხეს " +
+          "<kbd>Delete</kbd> შლის, სხვა შემთხვევაში — ყველა მონიშნულ ობიექტს.",
   tape:   "დააწკაპუნე საწყის წერტილზე, გადაიტანე და კვლავ დააწკაპუნე. ზომავს შენობებზეც. <kbd>Esc</kbd> ასუფთავებს.",
   site:   "დააწკაპუნე კუთხეებზე და მონიშნე სამუშაო ტერიტორია. დასრულება — <kbd>Enter</kbd> ან ორმაგი დაწკაპუნება. შიგნით არსებული შენობები გაქრება."
 };
@@ -653,6 +668,12 @@ var state = {
   data: {},                      // town -> { A: [...], B: [...] } — see townData()
   sites: {},                     // town -> the working area ring drawn on its map
   selected: null,
+  // Ctrl+click builds a set. `selected` stays the last one clicked — the panel,
+  // the corner handles and the ზონა dropdown all still speak about one object —
+  // and `selMore` carries the rest. Everything that transforms, deletes or
+  // duplicates asks citySelIds() instead, so the single-selection paths did not
+  // have to be rewritten to gain a group.
+  selMore: [],
   nextId: 1,
   massWhite: false, // masses in white instead of the zone colour
   selPt: null,      // index of the selected corner of the selected zoning area
@@ -867,7 +888,7 @@ var SITERING = null;
 // Which commit this bundle was built from. A pure function of HEAD, never the
 // clock, so rebuilding without a new commit still reproduces the file byte for
 // byte. Null when built outside a checkout.
-var BUILD = {"c":"bcc84ee","d":"2026-09-05"};
+var BUILD = {"c":"da19c48","d":"2026-09-05"};
 
 // Working areas that SHIP with the tool, one ring per town, from data/sites.json.
 // A trainer draws the district once with the ტერიტორია tool, the ring is baked
@@ -1572,7 +1593,12 @@ renderer.domElement.addEventListener("pointerdown", function (ev) {
   // selected, so a hit here is always a deliberate grab of a handle. Whichever
   // of the gizmo and the corner handles the ray meets first wins, because the
   // arrows reach far enough to cover neighbouring corners.
-  var gHit = vgizPick(ev), hHit = pickHandle(ev);
+  // ...except under Ctrl, which always means "change what is selected". With a
+  // set selected the gizmo sits in the middle of it at a constant size on
+  // screen, so it covers the very objects a student is trying to Ctrl+click out
+  // of the selection, and every one of those clicks would grab a handle instead.
+  var ctrlSel = ev.ctrlKey || ev.metaKey;
+  var gHit = ctrlSel ? null : vgizPick(ev), hHit = ctrlSel ? null : pickHandle(ev);
   if (gHit && (!hHit || gHit.distance <= hHit.distance)) {
     if (vgizStart(ev, gHit.object)) return;
   }
@@ -1655,11 +1681,19 @@ renderer.domElement.addEventListener("pointerdown", function (ev) {
   var hit = pickObject(ev);
   if (hit) {
     state.selPt = null;
-    select(hit.userData.id);
+    // Ctrl+click builds the set and never starts a drag: the modifier means
+    // "change what is selected", and dragging on the same gesture would move
+    // the object the student was only trying to add.
+    if (ev.ctrlKey || ev.metaKey) { citySelToggle(hit.userData.id); return; }
+    // Dragging a member of a set moves the whole set. Clicking one without the
+    // modifier is how you go back to just that object.
+    var already = citySelHas(hit.userData.id) && citySelIds().length > 1;
+    if (!already) select(hit.userData.id);
     var gp = groundPoint(ev);
     var it = findItem(hit.userData.id);
-    if (gp && it && it.kind === "zone") {
-      drag = { mode: "move", id: it.id, ox: gp.x - it.x, oz: gp.z - it.z };
+    if (gp && it && (it.kind === "zone" || already)) {
+      drag = { mode: "move", id: it.id, ox: gp.x - cityCentroid(it).x,
+               oz: gp.z - cityCentroid(it).z, group: already };
     }
   } else {
     state.selPt = null;
@@ -1710,10 +1744,21 @@ window.addEventListener("pointermove", function (ev) {
     if (!g) return;
     var it = findItem(drag.id);
     if (!it) return;
-    it.x = g.x - drag.ox;
-    it.z = g.z - drag.oz;
-    var mesh = meshFor(it.id);
-    if (mesh) mesh.position.set(it.x, terrainAt(it.x, it.z) + it.h / 2, it.z);
+    // The grabbed object goes under the cursor either way; with a set behind it,
+    // everything else travels the same distance.
+    var c0 = cityCentroid(it);
+    var dx = (g.x - drag.ox) - c0.x, dz = (g.z - drag.oz) - c0.z;
+    if (drag.group) {
+      cityGroupMove(citySelIds(), dx, dz);
+      citySelIds().forEach(function (id) { cityRegeom(findItem(id)); });
+      buildHandles();
+      markSelected();
+    } else {
+      it.x = g.x - drag.ox;
+      it.z = g.z - drag.oz;
+      var mesh = meshFor(it.id);
+      if (mesh) mesh.position.set(it.x, terrainAt(it.x, it.z) + it.h / 2, it.z);
+    }
   }
 });
 
@@ -1979,9 +2024,12 @@ function cgizTarget() {
   if (state.selected == null) return null;
   var it = findItem(state.selected);
   if (!it) return null;
-  var c = cityCentroid(it);
-  return { it: it, corner: null, mode: state.cgiz, o: [c.x, c.z],
-           rot: it.kind === "zone" ? (it.rot || 0) : 0 };
+  var ids = citySelIds(), many = ids.length > 1;
+  var c = many ? citySelPivot() : cityCentroid(it);
+  return { it: it, corner: null, mode: state.cgiz, o: [c.x, c.z], many: many, ids: ids,
+           // A set has no single angle to align the size arrows to, so they stay
+           // on the world axes; one object still gets arrows along its own sides.
+           rot: (!many && it.kind === "zone") ? (it.rot || 0) : 0 };
 }
 
 // Moving a corner is the one case that touches a single point. Everything else
@@ -2165,6 +2213,9 @@ function vgizStart(ev, hitObj) {
   var origin = new THREE.Vector3(t.o[0], terrainAt(t.o[0], t.o[1]) + 2, t.o[1]);
   var YUP = new THREE.Vector3(0, 1, 0);
   var d = { kind: hit.kind, id: t.it.id, corner: t.corner, origin: origin,
+            // A corner drag is always about one point, whatever else is selected.
+            many: !!t.many && t.corner == null, ids: t.ids || [],
+            pivot: { x: origin.x, z: origin.z },
             hint0: document.getElementById("hint").innerHTML };
 
   if (hit.kind === "rotate") {
@@ -2207,7 +2258,11 @@ function vgizMove(ev) {
     var raw = schAxisPoint(ev, d.origin, d.axis) - d.t0, want = raw;
     if (S.on) { var c0 = d.origin.dot(d.axis); want = snapTo(c0 + raw, S.move) - c0; }
     var step = want - d.applied;
-    if (step) { cityTranslate(it, d.corner, d.axis.x * step, d.axis.z * step); d.applied = want; }
+    if (step) {
+      if (d.many) cityGroupMove(d.ids, d.axis.x * step, d.axis.z * step);
+      else cityTranslate(it, d.corner, d.axis.x * step, d.axis.z * step);
+      d.applied = want;
+    }
     out = (d.axisId || "").toUpperCase() + "  " +
           (want >= 0 ? "+" : "") + want.toFixed(1) + " მ";
 
@@ -2219,7 +2274,8 @@ function vgizMove(ev) {
       ax = snapTo(d.origin.x + ax, S.move) - d.origin.x;
       az = snapTo(d.origin.z + az, S.move) - d.origin.z;
     }
-    cityTranslate(it, d.corner, ax - d.appliedX, az - d.appliedZ);
+    if (d.many) cityGroupMove(d.ids, ax - d.appliedX, az - d.appliedZ);
+    else cityTranslate(it, d.corner, ax - d.appliedX, az - d.appliedZ);
     d.appliedX = ax; d.appliedZ = az;
     out = "X " + (ax >= 0 ? "+" : "") + ax.toFixed(1) +
           "   Z " + (az >= 0 ? "+" : "") + az.toFixed(1) + " მ";
@@ -2232,7 +2288,11 @@ function vgizMove(ev) {
     while (st < -Math.PI) st += Math.PI * 2;
     d.a0 = a; d.total += st;
     var wantA = S.on ? snapTo(d.total, S.rot * Math.PI / 180) : d.total;
-    if (wantA !== d.applied) { cityRotate(it, wantA - d.applied); d.applied = wantA; }
+    if (wantA !== d.applied) {
+      if (d.many) cityGroupRotate(d.ids, wantA - d.applied, d.pivot);
+      else cityRotate(it, wantA - d.applied);
+      d.applied = wantA;
+    }
     out = (d.applied * 180 / Math.PI).toFixed(0) + "°";
 
   } else {                                       // scale, one axis or uniform
@@ -2249,14 +2309,17 @@ function vgizMove(ev) {
     if (S.on) totalK = Math.max(S.scale, snapTo(totalK, S.scale));
     var k = totalK / d.appliedK;
     if (Math.abs(k - 1) < 1e-6) return;
-    cityScale(it, d.kind === "scaleuni" ? null : d.axisId, k);
+    var aid = d.kind === "scaleuni" ? null : d.axisId;
+    if (d.many) cityGroupScale(d.ids, aid, k, d.pivot);
+    else cityScale(it, aid, k);
     d.appliedK = totalK;
     out = (d.kind === "scaleuni" ? "" : d.axisId.toUpperCase() + "  ") +
           "×" + totalK.toFixed(2);
   }
 
-  cityRegeom(it);
-  var lab = cityMeasure(it);
+  if (d.many) { d.ids.forEach(function (q) { cityRegeom(findItem(q)); }); buildHandles(); }
+  else cityRegeom(it);
+  var lab = d.many ? d.ids.length + " ობიექტი" : cityMeasure(it);
   document.getElementById("hint").textContent = out + (lab ? "   ·   " + lab : "");
 }
 
@@ -2358,9 +2421,12 @@ function finishPath() {
 // Selection emphasis alone, without touching the panel. Rebuilding one mesh
 // mid-drag has to restore the highlight, and it must not re-render the panel
 // while a slider in it is being held.
+// The argument is ignored and kept only so the dozen existing callers that pass
+// state.selected still read naturally: what is emphasised is the whole set.
 function markSelected(id) {
+  var ids = citySelIds();
   objRoot.children.forEach(function (m) {
-    var on = m.userData.id === id;
+    var on = ids.indexOf(m.userData.id) >= 0;
     if (m.userData.area) {                       // zoning area: brighten the fill
       if (m.material) m.material.opacity = on ? 0.66 : 0.42;
     } else if (m.children[0] && m.children[0].material) {
@@ -2379,10 +2445,14 @@ function pathLength(it) {
   return L;
 }
 
+// A plain click replaces the set. Every existing caller means "this one object
+// and nothing else", so clearing selMore here is what keeps a stale group from
+// surviving a tab switch, a delete or a fresh draw.
 function select(id) {
   if (id !== state.selected) state.selPt = null;
   state.selected = id;
-  markSelected(id);
+  state.selMore = [];
+  markSelected();
   buildHandles();
   renderProps();
 }
@@ -2394,6 +2464,189 @@ function primName(id) {
 
 var DUPBTN = '<button class="mini" id="dup" title="Ctrl+D" ' +
              'style="width:100%;margin-bottom:6px">დუბლიკატი</button>';
+
+// ---------------------------------------------------------------- multiple selection
+// Ctrl+click adds to the selection and Ctrl+clicking a selected object takes it
+// out again; a plain click still replaces the whole set, which is what a student
+// who has never heard of this feature will do.
+//
+// Rotating and scaling a group turns on one decision: what does it turn about?
+// 3ds Max calls it "use selection center" and it is the only answer that makes
+// a group behave like an object — each member spins on its own axis AND its
+// centre orbits the shared pivot. Turning each about its own centre instead
+// looks like a bug: five buildings all pirouette and the block never moves.
+function citySelIds() {
+  var out = [];
+  if (state.selected != null && findItem(state.selected)) out.push(state.selected);
+  (state.selMore || []).forEach(function (id) {
+    if (id !== state.selected && findItem(id) && out.indexOf(id) < 0) out.push(id);
+  });
+  return out;
+}
+function citySelHas(id) { return citySelIds().indexOf(id) >= 0; }
+
+// Ctrl+click. The clicked object always becomes `selected`, so the panel talks
+// about the thing the student just touched.
+function citySelToggle(id) {
+  var more = (state.selMore || []).slice();
+  if (citySelHas(id)) {                                   // take it out
+    more = more.filter(function (q) { return q !== id; });
+    if (id === state.selected) {
+      state.selected = more.length ? more.pop() : null;
+    }
+    state.selMore = more;
+    state.selPt = null;
+    markSelected(); buildHandles(); updateVGizmo(); renderProps();
+    return;
+  }
+  if (state.selected != null && more.indexOf(state.selected) < 0) more.push(state.selected);
+  state.selMore = more;
+  state.selected = id;
+  state.selPt = null;
+  markSelected(); buildHandles(); updateVGizmo(); renderProps();
+}
+
+// The pivot a group turns about: the mean of the members' own centres.
+function citySelPivot() {
+  var ids = citySelIds(), sx = 0, sz = 0, n = 0;
+  ids.forEach(function (id) {
+    var it = findItem(id); if (!it) return;
+    var c = cityCentroid(it); sx += c.x; sz += c.z; n++;
+  });
+  return n ? { x: sx / n, z: sz / n } : { x: 0, z: 0 };
+}
+
+function cityGroupMove(ids, dx, dz) {
+  ids.forEach(function (id) {
+    var it = findItem(id);
+    if (it) cityTranslate(it, null, dx, dz);
+  });
+}
+
+// Both of these read every centre before touching anything: cityRotate and
+// cityScale leave a member's own centre where it was, so the orbit can be
+// worked out first and applied after without the two interfering.
+function cityGroupRotate(ids, a, p) {
+  var sn = Math.sin(a), cs = Math.cos(a);
+  ids.forEach(function (id) {
+    var it = findItem(id); if (!it) return;
+    var c = cityCentroid(it);
+    var ox = c.x - p.x, oz = c.z - p.z;
+    cityRotate(it, a);                                    // spin on its own axis
+    cityTranslate(it, null, (p.x + ox * cs - oz * sn) - c.x,
+                            (p.z + ox * sn + oz * cs) - c.z);   // and carry it round
+  });
+}
+
+function cityGroupScale(ids, axisId, k, p) {
+  var kx = (!axisId || axisId === "x") ? k : 1;
+  var kz = (!axisId || axisId === "y") ? k : 1;
+  ids.forEach(function (id) {
+    var it = findItem(id); if (!it) return;
+    var c = cityCentroid(it);
+    cityScale(it, axisId, k);
+    cityTranslate(it, null, (p.x + (c.x - p.x) * kx) - c.x,
+                            (p.z + (c.z - p.z) * kz) - c.z);
+  });
+}
+
+// ---- the studio half ----------------------------------------------------
+function schSelIds() {
+  var out = [];
+  if (SC.sel != null && schFind(SC.sel)) out.push(SC.sel);
+  (SC.selMore || []).forEach(function (id) {
+    if (id !== SC.sel && schFind(id) && out.indexOf(id) < 0) out.push(id);
+  });
+  return out;
+}
+function schSelHas(id) { return schSelIds().indexOf(id) >= 0; }
+
+function schSelToggle(id) {
+  var more = (SC.selMore || []).slice();
+  if (schSelHas(id)) {
+    more = more.filter(function (q) { return q !== id; });
+    if (id === SC.sel) SC.sel = more.length ? more.pop() : null;
+    SC.selMore = more;
+  } else {
+    if (SC.sel != null && more.indexOf(SC.sel) < 0) more.push(SC.sel);
+    SC.selMore = more;
+    SC.sel = id;
+  }
+  SC.subSel = null;             // a set is an object-level idea
+  schRefreshHelpers();
+  schRenderPanel();
+}
+
+function schAllIdx(sh) {
+  var a = [];
+  for (var i = 0; i < sh.V.length; i++) a.push(i);
+  return a;
+}
+// A shape's own centre in world space, whatever the sub-object mode is doing.
+function schShapeCentre(sh) {
+  var c = [0, 0, 0], n = sh.V.length || 1;
+  for (var i = 0; i < sh.V.length; i++)
+    for (var q = 0; q < 3; q++) c[q] += sh.V[i][q] / n;
+  return new THREE.Vector3(c[0] + sh.pos[0], c[1] + sh.pos[1], c[2] + sh.pos[2]);
+}
+// Where the gizmo sits and what a group turns about.
+function schSelPivot() {
+  var ids = schSelIds();
+  if (ids.length < 2) {
+    var one = SC.sel != null ? schFind(SC.sel) : null;
+    return one ? selCentroid(one) : new THREE.Vector3();
+  }
+  var p = new THREE.Vector3();
+  ids.forEach(function (id) { p.add(schShapeCentre(schFind(id))); });
+  return p.multiplyScalar(1 / ids.length);
+}
+
+function schGroupMove(ids, d) {
+  ids.forEach(function (id) {
+    var sh = schFind(id); if (!sh) return;
+    sh.pos[0] += d.x; sh.pos[1] += d.y; sh.pos[2] += d.z;
+    var m = schMeshFor(id);
+    if (m) m.position.set(sh.pos[0], sh.pos[1], sh.pos[2]);
+  });
+}
+
+// The member spins about its own centre and its position orbits the pivot.
+// Doing it that way rather than rotating the vertices about the far-away pivot
+// keeps `pos` at the shape's middle, which is what the ადგილი boxes read.
+// Keyed on the axis id, not on the vector: the gizmo hands out a clone of the
+// AXES vector, so comparing by identity would silently always pick Z.
+var _gq = new THREE.Quaternion(), _gv = new THREE.Vector3();
+function schGroupRotate(ids, axisId, ang, p) {
+  var axis = axisById(axisId).v;
+  var ri = axisId === "x" ? 0 : axisId === "y" ? 1 : 2;
+  _gq.setFromAxisAngle(axis, ang);
+  ids.forEach(function (id) {
+    var sh = schFind(id); if (!sh) return;
+    rotateVerts(sh, schAllIdx(sh), axis, ang, schShapeCentre(sh));
+    _gv.set(sh.pos[0] - p.x, sh.pos[1] - p.y, sh.pos[2] - p.z).applyQuaternion(_gq);
+    sh.pos[0] = _gv.x + p.x; sh.pos[1] = _gv.y + p.y; sh.pos[2] = _gv.z + p.z;
+    if (!sh.rot) sh.rot = [0, 0, 0];
+    sh.rot[ri] = (sh.rot[ri] || 0) + ang * 180 / Math.PI;
+    regeom(sh);
+    var m = schMeshFor(id);
+    if (m) m.position.set(sh.pos[0], sh.pos[1], sh.pos[2]);
+  });
+}
+
+function schGroupScale(ids, axisId, k, p) {
+  var uniform = axisId === "xyz", a = uniform ? null : axisById(axisId).v;
+  ids.forEach(function (id) {
+    var sh = schFind(id); if (!sh) return;
+    scaleVertsAxis(sh, schAllIdx(sh), axisId, k, schShapeCentre(sh));
+    _gv.set(sh.pos[0] - p.x, sh.pos[1] - p.y, sh.pos[2] - p.z);
+    if (uniform) _gv.multiplyScalar(k);
+    else _gv.addScaledVector(a, _gv.dot(a) * (k - 1));
+    sh.pos[0] = _gv.x + p.x; sh.pos[1] = _gv.y + p.y; sh.pos[2] = _gv.z + p.z;
+    regeom(sh);
+    var m = schMeshFor(id);
+    if (m) m.position.set(sh.pos[0], sh.pos[1], sh.pos[2]);
+  });
+}
 
 // ---------------------------------------------------------------- transform type-in
 // The gizmo answers "drag it until it looks right". This answers "put it at
@@ -2433,12 +2686,38 @@ function xyzRow(key, label, unit, vals, on, step, dp, offTip) {
   return h + "</div>";
 }
 
-// The three rows together, from a descriptor either half builds.
+// The three rows together, from a descriptor either half builds. `hide` drops a
+// row outright, which is what a multiple selection wants: a group has a centre
+// you can type, but no single angle and no single size, and printing a 0 in
+// those boxes would be inventing a number rather than reporting one.
 function xformHTML(t) {
-  return xyzRow("pos",  "ადგილი",  "მ", t.pos,  t.posOn,  "0.5", 2, t.posTip) +
-         xyzRow("rot",  "ბრუნვა",  "°", t.rot,  t.rotOn,  "5",   0, t.rotTip) +
-         xyzRow("size", "ზომა",    "მ", t.size, t.sizeOn, "0.5", 2, t.sizeTip) +
-         (t.note ? '<p class="empty" style="margin:-3px 0 9px">' + t.note + "</p>" : "");
+  var hide = t.hide || [], h = "";
+  if (hide.indexOf("pos") < 0)
+    h += xyzRow("pos",  "ადგილი", "მ", t.pos,  t.posOn,  "0.5", 2, t.posTip);
+  if (hide.indexOf("rot") < 0)
+    h += xyzRow("rot",  "ბრუნვა", "°", t.rot,  t.rotOn,  "5",   0, t.rotTip);
+  if (hide.indexOf("size") < 0)
+    h += xyzRow("size", "ზომა",   "მ", t.size, t.sizeOn, "0.5", 2, t.sizeTip);
+  return h + (t.note ? '<p class="empty" style="margin:-3px 0 9px">' + t.note + "</p>" : "");
+}
+
+// What the panel shows when a Ctrl+click set is selected. ადგილი is the set's
+// own centre and typing into it carries everything; turning and sizing a group
+// stay on the gizmo, where the drag itself says what is happening.
+function groupXformCity() {
+  var p = citySelPivot();
+  return { pos: [p.x, -p.z, terrainAt(p.x, p.z)], posOn: [1, 1, 0],
+           rot: [0, 0, 0], rotOn: [0, 0, 0], size: [0, 0, 0], sizeOn: [0, 0, 0],
+           hide: ["rot", "size"],
+           posTip: "სიმაღლეს რელიეფი განსაზღვრავს",
+           note: "ჯგუფის ცენტრი. ბრუნვა და ზომა — გიზმოთი." };
+}
+function groupXformSch() {
+  var p = schSelPivot();
+  return { pos: uiFromWorld(p.x, p.y, p.z), posOn: [1, 1, 1],
+           rot: [0, 0, 0], rotOn: [0, 0, 0], size: [0, 0, 0], sizeOn: [0, 0, 0],
+           hide: ["rot", "size"],
+           note: "ჯგუფის ცენტრი. ბრუნვა და ზომა — გიზმოთი." };
 }
 
 // Wire a rendered block. `apply(key, axis, value)` returns true if it changed
@@ -2589,12 +2868,25 @@ function renderProps() {
   var it = state.selected != null ? findItem(state.selected) : null;
   if (!it) return;
   var box = document.getElementById("props");
-  box.insertAdjacentHTML("afterbegin", xformHTML(cityXform(it)));
+  var ids = citySelIds(), many = ids.length > 1;
+  box.insertAdjacentHTML("afterbegin",
+    (many ? '<p class="empty" style="margin:0 0 8px"><b>' + ids.length +
+            ' ობიექტი მონიშნულია.</b> Ctrl+დაწკაპუნება ამატებს და აკლებს.</p>' : "") +
+    xformHTML(many ? groupXformCity() : cityXform(it)));
   wireXform(box, function (key, ax, v) {
-    if (!cityXformSet(it, key, ax, v)) return false;
-    cityRegeom(it);
+    if (many) {
+      if (key !== "pos") return false;
+      var p = citySelPivot();
+      if (ax === 0) cityGroupMove(ids, v - p.x, 0);
+      else if (ax === 1) cityGroupMove(ids, 0, -v - p.z);
+      else return false;
+      ids.forEach(function (q) { cityRegeom(findItem(q)); });
+    } else {
+      if (!cityXformSet(it, key, ax, v)) return false;
+      cityRegeom(it);
+    }
     buildHandles();
-    markSelected(it.id);
+    markSelected();
     renderLegend();
     save();
     renderProps();
@@ -2736,23 +3028,43 @@ function renderPropsBody() {
 // of offset rather than the school's two, because two metres is invisible on a
 // 3.6 km map.
 function cityClone() {
-  if (state.selected == null) return;
-  var src = findItem(state.selected);
-  if (!src) return;
-  var c = JSON.parse(JSON.stringify(src));
-  c.id = state.nextId++;
-  if (c.pts) c.pts = c.pts.map(function (q) { return [q[0] + 15, q[1] + 15]; });
-  else { c.x += 15; c.z += 15; }
-  items().push(c);
+  var ids = citySelIds();
+  if (!ids.length) return;
+  var made = [];
+  ids.forEach(function (id) {
+    var src = findItem(id);
+    if (!src) return;
+    var c = JSON.parse(JSON.stringify(src));
+    c.id = state.nextId++;
+    if (c.pts) c.pts = c.pts.map(function (q) { return [q[0] + 15, q[1] + 15]; });
+    // A city primitive keeps its place in `pos`, not in x/z. The old line moved
+    // an x that primitives do not have, so a copied ცილინდრი landed exactly on
+    // top of the original and looked like nothing had happened.
+    else if (c.pos) { c.pos[0] += 15; c.pos[2] += 15; }
+    else { c.x += 15; c.z += 15; }
+    items().push(c);
+    made.push(c.id);
+  });
+  if (!made.length) return;
   rebuild();
-  select(c.id);
+  select(made[made.length - 1]);
+  state.selMore = made.slice(0, -1);          // the copies come out selected together
+  markSelected(); buildHandles(); renderProps();
   save();
 }
 
+// Takes the whole set: the panel says how many will go, and Delete has to
+// remove what the panel is talking about.
 function removeItem(id) {
+  var kill = citySelIds();
+  if (id != null && kill.indexOf(id) < 0) kill = [id];
   var a = items();
-  for (var i = 0; i < a.length; i++) if (a[i].id === id) { a.splice(i, 1); break; }
+  kill.forEach(function (q) {
+    for (var i = 0; i < a.length; i++) if (a[i].id === q) { a.splice(i, 1); break; }
+  });
   state.selected = null;
+  state.selMore = [];
+  state.selPt = null;
   rebuild(); save();
 }
 
@@ -2943,6 +3255,7 @@ function histCommit() {
   hist.stack.push(snap);
   if (hist.stack.length > hist.limit) hist.stack.shift();
   hist.pos = hist.stack.length - 1;
+  histButtons();
 }
 function histRestore(snap) {
   var o = JSON.parse(snap);
@@ -2975,8 +3288,19 @@ function histRestore(snap) {
     else { schRebuild(); schSave(); save(); }
   } finally { hist.restoring = false; }
 }
-function undo() { if (hist.pos > 0) { hist.pos--; histRestore(hist.stack[hist.pos]); } }
-function redo() { if (hist.pos < hist.stack.length - 1) { hist.pos++; histRestore(hist.stack[hist.pos]); } }
+function canUndo() { return hist.pos > 0; }
+function canRedo() { return hist.pos < hist.stack.length - 1; }
+function undo() { if (canUndo()) { hist.pos--; histRestore(hist.stack[hist.pos]); } histButtons(); }
+function redo() { if (canRedo()) { hist.pos++; histRestore(hist.stack[hist.pos]); } histButtons(); }
+
+// Greyed out means "there is nothing there", which is the one thing the keyboard
+// shortcut can never say. Called from undo/redo and from histPush, so the pair
+// tracks the stack however it changed.
+function histButtons() {
+  var u = document.getElementById("undoBtn"), r = document.getElementById("redoBtn");
+  if (u) u.disabled = !canUndo();
+  if (r) r.disabled = !canRedo();
+}
 
 // Files written before the per-town split hold one {A,B} pair that every town
 // drew into, so the same objects surfaced on all four maps. Send each object to
@@ -3282,6 +3606,10 @@ document.getElementById("ctxbtn").addEventListener("click", function () {
   refreshContext(); save();
 });
 
+document.getElementById("undoBtn").addEventListener("click", function () { undo(); });
+document.getElementById("redoBtn").addEventListener("click", function () { redo(); });
+histButtons();                       // start greyed out: nothing has happened yet
+
 // One download path for every export in the app. Two things here are
 // load-bearing, and სურათი used to have neither: the anchor has to be **in the
 // document** when it is clicked, and the payload has to be a **blob** rather
@@ -3337,8 +3665,10 @@ window.addEventListener("keydown", function (ev) {
   if (!isCity()) {
     if ((ev.key === "Delete" || ev.key === "Backspace") && SC.sel != null) {
       var a = schItems();
-      for (var i = 0; i < a.length; i++) if (a[i].id === SC.sel) { a.splice(i, 1); break; }
-      SC.sel = null; SC.subSel = null;
+      schSelIds().forEach(function (q) {
+        for (var i = 0; i < a.length; i++) if (a[i].id === q) { a.splice(i, 1); break; }
+      });
+      SC.sel = null; SC.selMore = []; SC.subSel = null;
       schRebuild(); schSave();
     }
     if (ev.key === "Escape") {
@@ -3678,7 +4008,8 @@ var SC = {
   nextId: 1,
   tool: "select",          // select | prim:<kind> | paint | pick
   sub: "object",           // object | face | edge | vertex
-  sel: null,               // shape id
+  sel: null,               // shape id — the last one clicked
+  selMore: [],             // the rest of a Ctrl+click set; see schSelIds()
   subSel: null,            // {type, index}
   paintId: "bld",
   // საბაზისო also paints outside the legend: paintFree swaps the bucket from
@@ -3986,15 +4317,24 @@ function schItems() { return SC.data[SC.variant]; }
 // The copy lands two metres off the original so it is visibly a second object,
 // and it comes out selected: press Ctrl+D four times and you have a row.
 function schClone() {
-  if (SC.sel == null) return;
-  var src = schFind(SC.sel);
-  if (!src) return;
-  var c = JSON.parse(JSON.stringify(src));
-  c.id = SC.nextId++;
-  c.pos = [src.pos[0] + 2, src.pos[1], src.pos[2] + 2];
-  schItems().push(c);
+  var ids = schSelIds();
+  if (!ids.length) return;
+  var made = [];
+  ids.forEach(function (id) {
+    var src = schFind(id);
+    if (!src) return;
+    var c = JSON.parse(JSON.stringify(src));
+    c.id = SC.nextId++;
+    c.pos = [src.pos[0] + 2, src.pos[1], src.pos[2] + 2];
+    schItems().push(c);
+    made.push(c.id);
+  });
+  if (!made.length) return;
   schRebuild();
-  schSelect(c.id, null);
+  schSelect(made[made.length - 1], null);
+  SC.selMore = made.slice(0, -1);             // the copies come out selected together
+  schRefreshHelpers();
+  schRenderPanel();
   schSave();
 }
 
@@ -4340,6 +4680,24 @@ function schRefreshHelpers() {
   var sh = SC.sel != null ? schFind(SC.sel) : null;
   if (!sh) return;
   var off = sh.pos;
+
+  // Every other member of a Ctrl+click set gets the same white outline, so the
+  // student can see what the gizmo is about to move. Only the last-clicked shape
+  // carries the sub-object handles below — a face belongs to one shape.
+  schSelIds().forEach(function (id) {
+    if (id === SC.sel) return;
+    var o = schFind(id); if (!o) return;
+    var pl = [], oe = edgeList(o.F);
+    for (var k = 0; k < oe.length; k++) {
+      var p = o.V[oe[k][0]], q = o.V[oe[k][1]];
+      pl.push(p[0]+o.pos[0],p[1]+o.pos[1],p[2]+o.pos[2],
+              q[0]+o.pos[0],q[1]+o.pos[1],q[2]+o.pos[2]);
+    }
+    var pg = new THREE.BufferGeometry();
+    pg.setAttribute("position", new THREE.Float32BufferAttribute(pl, 3));
+    SC.helpers.add(new THREE.LineSegments(pg,
+      new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 })));
+  });
 
   var el = [], edges = edgeList(sh.F);
   for (var i = 0; i < edges.length; i++) {
@@ -4863,7 +5221,7 @@ function updateGizmo() {
   var sh = SC.sel != null ? schFind(SC.sel) : null;
   if (!sh || isCity()) { GIZ.root.visible = false; return; }
   GIZ.root.visible = true;
-  var o = selCentroid(sh);
+  var o = schSelPivot();
   GIZ.root.position.copy(o);
   var s = state.view === "plan"
     ? SC.orbit.planZoom * 0.30
@@ -4954,9 +5312,11 @@ function gizmoStart(ev, hit) {
     schRefreshHelpers();
     extruded = true;
   }
-  var origin = selCentroid(sh);
+  var gids = schSelIds(), gmany = gids.length > 1 && (SC.sub === "object" || !SC.subSel);
+  var origin = gmany ? schSelPivot() : selCentroid(sh);
   var axis = hit.axis === "xyz" ? new THREE.Vector3(0, 1, 0) : axisById(hit.axis).v.clone();
   var d = { kind: hit.kind, axisId: hit.axis, axis: axis, origin: origin,
+            many: gmany, ids: gids,
             id: sh.id, idx: selVertIndices(sh),
             applied: 0, appliedK: 1, total: 0,
             appliedVec: new THREE.Vector3() };
@@ -4984,6 +5344,7 @@ function gizmoStart(ev, hit) {
 // Applies a world-space translation to whatever is selected.
 function applyMove(sh, d, delta) {
   if (delta.lengthSq() < 1e-12) return;
+  if (d && d.many) { schGroupMove(d.ids, delta); return; }
   if (SC.sub === "object" || !SC.subSel) {
     sh.pos[0] += delta.x; sh.pos[1] += delta.y; sh.pos[2] += delta.z;
     var m = schMeshFor(sh.id);
@@ -5048,17 +5409,21 @@ function gizmoMove(ev) {
     var wantA = S.on ? snapTo(d.total, S.rot * Math.PI / 180) : d.total;
     var da = wantA - d.applied;
     if (da) {
-      rotateVerts(sh, d.idx, d.axis, da, d.origin);
-      // Keep the ბრუნვა boxes honest: a shape turned by dragging has to read
-      // back the angle it was turned to. Only in object mode — turning one face
-      // is not turning the shape.
-      if (SC.sub === "object" || !SC.subSel) {
-        if (!sh.rot) sh.rot = [0, 0, 0];
-        var ri = d.axisId === "x" ? 0 : d.axisId === "y" ? 1 : 2;
-        sh.rot[ri] = (sh.rot[ri] || 0) + da * 180 / Math.PI;
+      if (d.many) {
+        schGroupRotate(d.ids, d.axisId, da, d.origin);   // records each shape's angle itself
+      } else {
+        rotateVerts(sh, d.idx, d.axis, da, d.origin);
+        // Keep the ბრუნვა boxes honest: a shape turned by dragging has to read
+        // back the angle it was turned to. Only in object mode — turning one face
+        // is not turning the shape.
+        if (SC.sub === "object" || !SC.subSel) {
+          if (!sh.rot) sh.rot = [0, 0, 0];
+          var ri = d.axisId === "x" ? 0 : d.axisId === "y" ? 1 : 2;
+          sh.rot[ri] = (sh.rot[ri] || 0) + da * 180 / Math.PI;
+        }
+        regeom(sh);
       }
       d.applied = wantA;
-      regeom(sh);
     }
     SC.gizReadout = d.axisId.toUpperCase() + "  " +
                     (d.applied * 180 / Math.PI).toFixed(0) + "°";
@@ -5077,9 +5442,9 @@ function gizmoMove(ev) {
     if (S.on) totalK = Math.max(S.scale, snapTo(totalK, S.scale));
     var k = totalK / d.appliedK;
     if (Math.abs(k - 1) < 1e-6) return;
-    scaleVertsAxis(sh, d.idx, d.axisId, k, d.origin);
+    if (d.many) schGroupScale(d.ids, d.axisId, k, d.origin);
+    else { scaleVertsAxis(sh, d.idx, d.axisId, k, d.origin); regeom(sh); }
     d.appliedK = totalK;
-    regeom(sh);
     SC.gizReadout = (d.axisId === "xyz" ? "" : d.axisId.toUpperCase() + "  ") +
                     "×" + totalK.toFixed(2);
   }
@@ -5117,8 +5482,11 @@ function schAxisPoint(ev, origin, dir) {
   return (b * e - c * d) / den;
 }
 
+// As in the city: a plain select replaces the set, so no group survives a
+// delete, a document switch or a freshly drawn shape.
 function schSelect(id, sub) {
   SC.sel = id;
+  SC.selMore = [];
   SC.subSel = sub || null;
   schRefreshHelpers();
   placeHuman();                  // only moves while it has not been placed
@@ -5226,7 +5594,10 @@ function schPointerDown(ev) {
   hideCtxMenu();
   if (ev.button !== 0) return;
 
-  var gh = gizmoPick(ev);                  // gizmo wins over everything else
+  // The gizmo wins over everything else — except under Ctrl, which always means
+  // "change what is selected". A gizmo standing in the middle of a set covers
+  // the very shapes a student is Ctrl+clicking to remove from it.
+  var gh = (ev.ctrlKey || ev.metaKey) ? null : gizmoPick(ev);
   if (gh && gizmoStart(ev, gh)) return;
 
   if (SC.tool.indexOf("prim:") === 0) {
@@ -5308,9 +5679,14 @@ function schPointerDown(ev) {
   if (!sh) return;
 
   if (SC.sub === "object") {
-    schSelect(sh.id, null);
+    // Ctrl+click edits the set and starts no drag, so adding a shape cannot
+    // also nudge it.
+    if (ev.ctrlKey || ev.metaKey) { schSelToggle(sh.id); return; }
+    var already = schSelHas(sh.id) && schSelIds().length > 1;
+    if (!already) schSelect(sh.id, null);
     var g = schGroundPoint(ev, sh.pos[1]);
-    if (g) schDrag = { mode: "move", id: sh.id, ox: g.x - sh.pos[0], oz: g.z - sh.pos[2] };
+    if (g) schDrag = { mode: "move", id: sh.id, ox: g.x - sh.pos[0], oz: g.z - sh.pos[2],
+                       group: already };
     return;
   }
 
@@ -5383,10 +5759,16 @@ function schPointerMove(ev) {
     var g = schGroundPoint(ev, sh.pos[1]);
     if (!g) return;
     schDrag.changed = true;
-    sh.pos[0] = g.x - schDrag.ox;
-    sh.pos[2] = g.z - schDrag.oz;
-    var m = schMeshFor(sh.id);
-    if (m) m.position.set(sh.pos[0], sh.pos[1], sh.pos[2]);
+    if (schDrag.group) {
+      // the grabbed shape lands under the cursor; the rest travel with it
+      schGroupMove(schSelIds(), new THREE.Vector3(
+        (g.x - schDrag.ox) - sh.pos[0], 0, (g.z - schDrag.oz) - sh.pos[2]));
+    } else {
+      sh.pos[0] = g.x - schDrag.ox;
+      sh.pos[2] = g.z - schDrag.oz;
+      var m = schMeshFor(sh.id);
+      if (m) m.position.set(sh.pos[0], sh.pos[1], sh.pos[2]);
+    }
     schRefreshHelpers();
     return;
   }
@@ -5696,7 +6078,11 @@ function schRenderPanel() {
            '<input type="color" id="shColorI" value="' + shColor(sh) + '">' +
            '<button class="mini" id="shColorX"' + (sh.color ? "" : " disabled") +
            ' title="ფერი კვლავ ლეგენდიდან">ლეგენდას</button></div>';
-    h += xformHTML(schXform(sh));
+    var gids = schSelIds(), gmany = gids.length > 1;
+    if (gmany)
+      h += '<p class="empty" style="margin:0 0 8px"><b>' + gids.length +
+           ' ფიგურა მონიშნულია.</b> Ctrl+დაწკაპუნება ამატებს და აკლებს.</p>';
+    h += xformHTML(gmany ? groupXformSch() : schXform(sh));
     var what = SC.subSel ? SUBMODES.filter(function (s) { return s.id === SC.subSel.type; })[0] : null;
     h += '<div class="row"><label>' + (what ? what.ka : "ფიგურა") + '</label>' +
          '<button class="mini" id="scDn">−</button><button class="mini" id="scUp">+</button>' +
@@ -5763,7 +6149,14 @@ function schRenderPanel() {
   box.innerHTML = h;
 
   if (sh) wireXform(box, function (key, ax, v) {
-    if (!schXformSet(sh, key, ax, v)) return false;
+    var ids = schSelIds();
+    if (ids.length > 1) {
+      if (key !== "pos") return false;
+      var p = schSelPivot(), want = uiFromWorld(p.x, p.y, p.z);
+      want[ax] = v;
+      var w = uiToWorld(want);
+      schGroupMove(ids, new THREE.Vector3(w.x - p.x, w.y - p.y, w.z - p.z));
+    } else if (!schXformSet(sh, key, ax, v)) return false;
     schRefreshHelpers();
     schSave();
     schRenderPanel();
@@ -5830,8 +6223,10 @@ function schRenderPanel() {
   if ((b = document.getElementById("schDup"))) b.onclick = function () { schClone(); };
   if ((b = document.getElementById("schDel"))) b.onclick = function () {
     var a = schItems();
-    for (var i = 0; i < a.length; i++) if (a[i].id === sh.id) { a.splice(i, 1); break; }
-    SC.sel = null; SC.subSel = null;
+    schSelIds().forEach(function (q) {
+      for (var i = 0; i < a.length; i++) if (a[i].id === q) { a.splice(i, 1); break; }
+    });
+    SC.sel = null; SC.selMore = []; SC.subSel = null;
     schRebuild(); schSave();
   };
   function doExtrude(d) {
@@ -6234,7 +6629,10 @@ if (/[?&]debug=1/.test(location.search)) {
                       objRoot: objRoot, items: items, rebuild: rebuild, scene: scene,
                       // the city's own selection, so the ქალაქი panel can be driven
                       // from outside the way schSelect already drives the studio's
-                      select: select, renderProps: renderProps, schRenderPanel: schRenderPanel };
+                      select: select, renderProps: renderProps, schRenderPanel: schRenderPanel,
+                      citySelIds: citySelIds, schSelIds: schSelIds,
+                      citySelPivot: citySelPivot, schSelPivot: schSelPivot,
+                      canUndo: canUndo, canRedo: canRedo, camera: function () { return camera; } };
 }
 
 // ?selftest=1 asserts pan direction. Panning is grab-the-world: the ground must
@@ -6889,6 +7287,76 @@ if (/[?&]selftest=1/.test(location.search)) {
   cityXformSet(cz, "size", 1, 50);
   want("a typed depth is taken literally", cz.d, 50);
   want("a zero size is refused", cityXformSet(cz, "size", 1, 0), false);
+
+  // ---- multiple selection -----------------------------------------------
+  // A group turns about the selection centre: each member spins on its own axis
+  // AND orbits the pivot. Turning each about its own centre instead is the
+  // classic wrong answer — every building pirouettes and the block never moves.
+  var _sv0 = state.selected, _sm0 = state.selMore, _var0 = state.variant;
+  var bag = items();
+  var m1 = { id: -81, kind: "zone", type: "sacx", x: 10, z: 0, w: 4, d: 4, h: 3, rot: 0 };
+  var m2 = { id: -82, kind: "zone", type: "sacx", x: -10, z: 0, w: 4, d: 4, h: 3, rot: 0 };
+  bag.push(m1); bag.push(m2);
+  state.selected = -81; state.selMore = [-82];
+  want("ctrl+click builds a set of two", citySelIds().length, 2);
+  var piv = citySelPivot();
+  want("the pivot sits between them", Math.round(piv.x) + "," + Math.round(piv.z), "0,0");
+
+  cityGroupMove(citySelIds(), 5, 0);
+  want("a group move carries both", m1.x + "," + m2.x, "15,-5");
+  cityGroupMove(citySelIds(), -5, 0);
+
+  cityGroupRotate(citySelIds(), Math.PI / 2, citySelPivot());
+  want("a group turn carries the members round the pivot",
+       (Math.abs(m1.x) < 0.001 && Math.abs(m1.z - 10) < 0.001) ? "yes" : "no", "yes");
+  want("and each member turns on its own axis too", Math.round(degOf(m1.rot)), 90);
+  cityGroupRotate(citySelIds(), -Math.PI / 2, citySelPivot());
+
+  cityGroupScale(citySelIds(), null, 2, citySelPivot());
+  want("a group scale spreads them apart", Math.round(m1.x), 20);
+  want("and grows each of them", Math.round(m1.w), 8);
+
+  // Taking the last one out empties the set rather than leaving a phantom id.
+  state.selected = -81; state.selMore = [-82];
+  citySelToggle(-82);
+  want("ctrl+click again removes it", citySelIds().length, 1);
+  citySelToggle(-81);
+  want("removing the last leaves nothing", citySelIds().length, 0);
+
+  // Delete takes the whole set, so what goes matches what the panel counted.
+  state.selected = -81; state.selMore = [-82];
+  removeItem(null);
+  want("delete takes every selected object",
+       (findItem(-81) || findItem(-82)) ? "some left" : "all gone", "all gone");
+  state.selected = _sv0; state.selMore = _sm0; state.variant = _var0;
+
+  // The studio pivot is the mean of the shapes, not of the last one clicked.
+  var q1 = { id: -91, kind: "box", pos: [0, 0, 0], V: pBox(2,2,2).V, F: pBox(2,2,2).F };
+  var q2 = { id: -92, kind: "box", pos: [20, 0, 0], V: pBox(2,2,2).V, F: pBox(2,2,2).F };
+  var sbag = schItems(), _ss0 = SC.sel, _sm1 = SC.selMore, _sb0 = SC.sub;
+  sbag.push(q1); sbag.push(q2);
+  SC.sel = -91; SC.selMore = [-92]; SC.sub = "object"; SC.subSel = null;
+  want("the studio set has two", schSelIds().length, 2);
+  want("its pivot is halfway", Math.round(schSelPivot().x), 10);
+  schGroupMove(schSelIds(), new THREE.Vector3(0, 3, 0));
+  want("a studio group move lifts both", q1.pos[1] + "," + q2.pos[1], "3,3");
+  schGroupRotate(schSelIds(), "z", Math.PI / 2, schSelPivot());
+  want("a studio group turn swings one onto the other's line",
+       Math.abs(q1.pos[0] - 10) < 0.001 ? "yes" : "no", "yes");
+  SC.sel = _ss0; SC.selMore = _sm1; SC.sub = _sb0;
+  for (var si = sbag.length - 1; si >= 0; si--) if (sbag[si].id === -91 || sbag[si].id === -92) sbag.splice(si, 1);
+
+  // ---- undo / redo buttons ----------------------------------------------
+  // The buttons exist because Ctrl+Z never reaches the page while the focus is
+  // in a panel field. They must know when there is nothing left to do.
+  var _hp0 = hist.pos, _hs0 = hist.stack;
+  hist.stack = ["a"]; hist.pos = 0;
+  want("nothing to undo at the bottom of the stack", canUndo(), false);
+  want("nothing to redo at the top of the stack", canRedo(), false);
+  hist.stack = ["a", "b", "c"]; hist.pos = 1;
+  want("undo is live in the middle", canUndo(), true);
+  want("redo is live in the middle", canRedo(), true);
+  hist.pos = _hp0; hist.stack = _hs0;
 
   // ---- სურათი ------------------------------------------------------------
   // The photo is named after what is in it. This used to read the town and the
