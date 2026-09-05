@@ -64,7 +64,7 @@ To rebuild the ground textures from source (needs internet):
 
     bash data/make-maps.sh
 
-`?selftest=1` runs 135 assertions in the page and prints the results over it. Run it
+`?selftest=1` runs 153 assertions in the page and prints the results over it. Run it
 before shipping a build, and run it on `bekura3d.html` rather than on `app.html`:
 the bundle is what students open, and three of the assertions need the ground
 textures that only the bundle carries inline.
@@ -96,10 +96,36 @@ city rail as well as in the modelling studio, with the same `W` / `E` / `R` shor
 city they are reduced to what a plan can mean: two ground axes plus a free-movement square, one
 rotation ring about the vertical, and sizing along those same two axes or both at once. Nothing
 pitches or rolls, because every object here is draped on terrain. A mass carries its angle in a
-`rot` field; an area or a path has nowhere to put one, so its points turn about their own centre
-instead, same gesture, same result. Dragging shows the running figure in the hint bar together
-with the size it has reached, so a team sizing a zone reads hectares while they drag rather than
-after.
+`rot` field; an area or a path keeps the running total in the same field while its points turn
+about their own centre, so the angle can be read back and typed even where there is no mesh to
+turn. Dragging shows the running figure in the hint bar together with the size it has reached, so
+a team sizing a zone reads hectares while they drag rather than after.
+
+**And every transform can be typed.** With something selected, the panel on the right opens with
+three rows of numbers — **ადგილი**, **ბრუნვა**, **ზომა** — X, Y and Z in the colours of the
+gizmo's own axes. The gizmo answers "drag it until it looks right"; these answer "put it at 12
+metres", which is the question a plan asks. Both halves of the app carry the same three rows, so
+a student who learns them in სკოლა does not have to find them again in ქალაქი.
+
+The frame is the one the rest of the app shows, **X east, Y north, Z up**, while three.js is Y-up
+internally; every read and write goes through `uiFromWorld` / `uiToWorld` and nowhere else,
+because getting it wrong in one place sends a typed northing underground. The self-test asserts
+the mapping in both directions.
+
+A field the selection cannot use greys out rather than disappearing, so the block keeps its shape
+between selections:
+
+| Where | What is locked, and why |
+|---|---|
+| ქალაქი, ადგილი Z | The terrain gives it. The box shows the ground level at that point. |
+| ქალაქი, ბრუნვა X and Y | Nothing pitches or rolls on draped ground, matching the single ring the city gizmo offers. |
+| ქალაქი, ზომა Z | On a mass it is live and sets the height; on a city primitive the height rides on the vertices, and on an area there is none. On a path it is the ribbon's width. |
+| სკოლა, ბრუნვა and ზომა | Quiet in წახნაგი / წიბო / წვერო: turning one face is not turning the shape. ადგილი stays live, because the object's own position is unambiguous either way. |
+
+In the studio, rotation and size are baked into the vertices — there is no stored matrix to read
+back — so a shape carries a `rot` triple recording what it has been turned about each axis, and
+typing an absolute angle applies the difference. The gizmo writes to the same record, so dragging
+a shape round and then reading the box gives the angle you actually turned it to.
 
 The ground under the plan has two states, switched with **რუკა / სატელიტი** in the panel. რუკა
 is the drawn OpenStreetMap sheet: street names, plot lines, the things a map asserts.
@@ -175,6 +201,8 @@ trade to revisit if the classroom machines turn out to have room for it.
   `Esc` clears it.
 - **Live transform figures.** While you drag a gizmo, a label by the shape shows exactly how
   far it moved (metres per axis), how many degrees it turned, or the scale factor.
+- **Or type the figure instead.** ადგილი / ბრუნვა / ზომა at the top of the panel take numbers
+  directly, in metres and degrees, on all three axes. See **Transform works in every tab** above.
 - **Snapping** lands on the absolute grid, with მიბმა on, a moved shape's coordinate comes to
   rest on whole metres, not just a rounded step from where it started.
 - **Right-click a shape for shading**, Blender style: გლუვი (smooth) / ბრტყელი (flat) /
@@ -285,6 +313,11 @@ Keep the **virtual-time budget small (~4 s) and the window small**. The assertio
 synchronously at start-up, so they need almost no budget; a large one just lets the render loop
 spin under software WebGL until the run times out and reports nothing. Results are printed as
 each check happens, so a throw still shows everything up to the failure plus an `ERR` line.
+
+**Give it a fresh `--user-data-dir`.** The app restores the camera from `localStorage` on
+startup, so a profile that has had the app driven in it before will fail the pan assertions —
+they check a camera that a previous session already moved. A clean profile per run, and they
+are green.
 
 To change which part of a town is shown, regenerate the ground textures, they are OSM tiles
 at zoom 16, 1024×1024, about 1820 m across, roughly 1.78 m per pixel.

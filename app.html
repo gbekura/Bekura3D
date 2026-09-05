@@ -177,6 +177,28 @@
   .val{font-size:13px;font-variant-numeric:tabular-nums;width:60px;text-align:right;flex:none}
   /* read-only rows: no slider to absorb the gap, so the value takes it */
   .val.auto{width:auto;flex:1;min-width:0}
+  /* Transform type-in. Three fields to a row will not fit the 74px label of a
+     .row — the panel is 240px — so the caption takes its own line and the
+     fields get the full width underneath it. */
+  .xcap{font-size:12px;color:rgba(255,255,255,.62);margin:0 0 4px}
+  .xcap i{font-style:normal;color:rgba(255,255,255,.34)}
+  .xyz{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:9px}
+  .xyz .f{display:flex;align-items:center;gap:3px;min-width:0;
+        background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);
+        border-radius:7px;padding:4px 5px}
+  .xyz .f:focus-within{border-color:var(--cyan)}
+  .xyz .f b{font-size:10.5px;font-weight:700;flex:none}
+  .xyz .f input{background:none;border:0;padding:0;width:100%;min-width:0;color:#fff;
+        font-family:var(--ka);font-size:12.5px;font-variant-numeric:tabular-nums}
+  .xyz .f input:focus{outline:none}
+  /* A field the selection cannot use stays in place and greys out. It still
+     carries its number: the height of a mass on a hillside is worth reading
+     even though the terrain, not the student, decides it. */
+  .xyz .f.off{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.08)}
+  .xyz .f.off b{opacity:.45}
+  .xyz .f.off input{color:rgba(255,255,255,.38)}
+  .xyz .f input::-webkit-outer-spin-button,
+  .xyz .f input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   /* Georgian labels are long. Let them wrap onto a second line rather than be
      truncated — the value is already protected by min-width:0 on the range. */
   .row label{width:84px;white-space:normal;line-height:1.25}
@@ -1970,7 +1992,12 @@ function cityTranslate(it, corner, dx, dz) {
 // A mass carries an angle. An area or a path has nowhere to put one, so its
 // points turn about their own centre instead: same gesture, same result.
 function cityRotate(it, a) {
-  if (it.kind === "zone" || it.kind === "shape") { it.rot = (it.rot || 0) + a; return; }
+  // Every kind carries the running angle now, because the ბრუნვა box has to
+  // show an absolute figure and set one. On a zone or a shape the mesh is
+  // turned by it; on an area or a path the points are already turned below and
+  // nothing reads `rot` back, so the record costs nothing and cannot double up.
+  it.rot = (it.rot || 0) + a;
+  if (it.kind === "zone" || it.kind === "shape") return;
   var c = cityCentroid(it), sn = Math.sin(a), cs = Math.cos(a);
   for (var i = 0; i < it.pts.length; i++) {
     var x = it.pts[i][0] - c.x, z = it.pts[i][1] - c.z;
@@ -2360,7 +2387,213 @@ function primName(id) {
 var DUPBTN = '<button class="mini" id="dup" title="Ctrl+D" ' +
              'style="width:100%;margin-bottom:6px">დუბლიკატი</button>';
 
+// ---------------------------------------------------------------- transform type-in
+// The gizmo answers "drag it until it looks right". This answers "put it at
+// 12 metres", which is the question a plan asks. Both halves of the app get the
+// same three rows, because a student who learns them in სკოლა should not have to
+// find them again in ქალაქი.
+//
+// The presented frame is the Max one the whole app shows: X east, Y north, Z up.
+// three.js is Y-up internally, so every read and write funnels through these two
+// and nowhere else. Get this wrong in one place and a typed Y sends the shape
+// underground.
+function uiFromWorld(x, y, z) { return [x, -z, y]; }
+function uiToWorld(a) { return { x: a[0], y: a[2], z: -a[1] }; }
+
+var XYZC = ["#E5534B", "#7FC24A", "#4A8FE5"];      // the three AXES colours
+var XYZL = ["X", "Y", "Z"];
+
+function xfmt(v, dp) {
+  if (!isFinite(v)) return "0";
+  var s = v.toFixed(dp);
+  return s.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+}
+
+// One captioned row of three numeric fields. `on[i]` marks the editable ones;
+// a field the selection cannot use is disabled rather than hidden, so the block
+// keeps the same shape between selections and stays readable.
+function xyzRow(key, label, unit, vals, on, step, dp, offTip) {
+  var h = '<div class="xcap">' + label + (unit ? ' <i>' + unit + '</i>' : '') + '</div><div class="xyz">';
+  for (var i = 0; i < 3; i++) {
+    h += '<div class="f' + (on[i] ? '' : ' off') + '"' +
+         (!on[i] && offTip ? ' title="' + offTip + '"' : '') + '>' +
+         '<b style="color:' + XYZC[i] + '">' + XYZL[i] + '</b>' +
+         '<input type="number" step="' + step + '" data-xf="' + key + '" data-xa="' + i + '"' +
+         (on[i] ? '' : ' disabled') + ' value="' + xfmt(vals[i], dp) + '">' +
+         '</div>';
+  }
+  return h + "</div>";
+}
+
+// The three rows together, from a descriptor either half builds.
+function xformHTML(t) {
+  return xyzRow("pos",  "ადგილი",  "მ", t.pos,  t.posOn,  "0.5", 2, t.posTip) +
+         xyzRow("rot",  "ბრუნვა",  "°", t.rot,  t.rotOn,  "5",   0, t.rotTip) +
+         xyzRow("size", "ზომა",    "მ", t.size, t.sizeOn, "0.5", 2, t.sizeTip) +
+         (t.note ? '<p class="empty" style="margin:-3px 0 9px">' + t.note + "</p>" : "");
+}
+
+// Wire a rendered block. `apply(key, axis, value)` returns true if it changed
+// something; the caller then rebuilds, saves and re-renders. Committing on
+// change rather than input matters twice over: save() takes an undo snapshot, so
+// one per keystroke would flush the history, and re-rendering mid-keystroke
+// would tear the field out from under the cursor.
+function wireXform(box, apply) {
+  box.querySelectorAll("input[data-xf]").forEach(function (el) {
+    el.onchange = function () {
+      var v = parseFloat(this.value);
+      if (!isFinite(v)) { this.value = this.defaultValue; return; }
+      var key = this.dataset.xf, ax = +this.dataset.xa;
+      if (apply(key, ax, v) === false) return;
+      // Put the caret back where it was: a student tabbing X → Y → Z should not
+      // be thrown to the top of the panel after every field.
+      var again = document.querySelector(
+        '#' + box.id + ' input[data-xf="' + key + '"][data-xa="' + ax + '"]');
+      if (again) { again.focus(); again.select(); }
+    };
+  });
+}
+
+// The span of a point ring, in the presented axes.
+function ptsSpan(pts) {
+  var x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+  for (var i = 0; i < pts.length; i++) {
+    if (pts[i][0] < x0) x0 = pts[i][0];
+    if (pts[i][0] > x1) x1 = pts[i][0];
+    if (pts[i][1] < z0) z0 = pts[i][1];
+    if (pts[i][1] > z1) z1 = pts[i][1];
+  }
+  return [x1 - x0, z1 - z0];
+}
+
+function degOf(rad) { return ((((rad || 0) * 180 / Math.PI) % 360) + 360) % 360; }
+
+// ---- the city descriptor ------------------------------------------------
+// Vertical position is not offered here and the note says why: every object in
+// ქალაქი is draped on the terrain, so its height is the ground's to give. For
+// the same reason nothing pitches or rolls, and only the vertical ring of
+// ბრუნვა is live — which is exactly what the city gizmo shows.
+function cityXform(it) {
+  var c = cityCentroid(it), size, sizeOn;
+  if (it.kind === "zone") {
+    size = [it.w, it.d, it.h]; sizeOn = [1, 1, 1];
+  } else if (it.kind === "shape") {
+    var b = bboxOf(it.V);
+    size = [b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], b.hi[1] - b.lo[1]];
+    sizeOn = [1, 1, 0];                        // height rides on the vertices
+  } else {
+    var e = ptsSpan(it.pts);
+    size = [e[0], e[1], it.kind === "path" ? it.width : 0];
+    sizeOn = [1, 1, it.kind === "path" ? 1 : 0];
+  }
+  return {
+    pos:  [c.x, -c.z, terrainAt(c.x, c.z)], posOn:  [1, 1, 0],
+    rot:  [0, 0, degOf(it.rot)],             rotOn:  [0, 0, 1],
+    size: size,                              sizeOn: sizeOn,
+    posTip:  "სიმაღლეს რელიეფი განსაზღვრავს",
+    rotTip:  "ქალაქში ყველაფერი რელიეფზეა დაფენილი — მხოლოდ ვერტიკალური ღერძი ბრუნავს",
+    sizeTip: it.kind === "shape" ? "სიმაღლე გიზმოთი იცვლება" : "",
+    note: "Z — მიწის ნიშნული ამ წერტილში."
+  };
+}
+
+function cityXformSet(it, key, ax, v) {
+  if (key === "pos") {
+    var c = cityCentroid(it);
+    if (ax === 0) cityTranslate(it, null, v - c.x, 0);
+    else if (ax === 1) cityTranslate(it, null, 0, -v - c.z);
+    else return false;
+    return true;
+  }
+  if (key === "rot") {
+    if (ax !== 2) return false;
+    cityRotate(it, (v - degOf(it.rot)) * Math.PI / 180);
+    return true;
+  }
+  if (v <= 0) return false;                    // a zero-metre object is a hole
+  if (it.kind === "zone") {
+    if (ax === 0) it.w = v; else if (ax === 1) it.d = v; else it.h = v;
+    return true;
+  }
+  if (it.kind === "path" && ax === 2) { it.width = Math.max(3, Math.min(30, v)); return true; }
+  var cur = cityXform(it).size[ax];
+  if (!(cur > 0) || ax === 2) return false;
+  cityScale(it, ax === 0 ? "x" : "y", v / cur);
+  return true;
+}
+
+// ---- the studio descriptor ----------------------------------------------
+// Rotation and size are baked into the vertices here — there is no stored
+// matrix to read back — so `rot` is a record of what has been turned about each
+// axis, kept only for the whole object. In a sub-object mode the two rows go
+// quiet: turning one face is not turning the shape, and pretending otherwise
+// would put a number in the box that nothing could undo.
+function schXform(sh) {
+  var whole = (SC.sub === "object" || !SC.subSel) ? 1 : 0;
+  var b = bboxOf(sh.V), r = sh.rot || [0, 0, 0];
+  return {
+    pos:  uiFromWorld(sh.pos[0], sh.pos[1], sh.pos[2]), posOn: [1, 1, 1],
+    rot:  [r[0] || 0, r[1] || 0, r[2] || 0],            rotOn: [whole, whole, whole],
+    size: [b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], b.hi[1] - b.lo[1]],
+    sizeOn: [whole, whole, whole],
+    rotTip:  "ქვე-ობიექტის რეჟიმში მთელი ფიგურა არ ბრუნავს",
+    sizeTip: "ქვე-ობიექტის რეჟიმში მთელი ფიგურა არ იზომება",
+    note: whole ? "" : "რიცხვები მთელ ფიგურას ეხება — გამოდი ობიექტის რეჟიმში."
+  };
+}
+
+function schXformSet(sh, key, ax, v) {
+  if (key === "pos") {
+    var p = uiFromWorld(sh.pos[0], sh.pos[1], sh.pos[2]);
+    p[ax] = v;
+    var w = uiToWorld(p);
+    sh.pos[0] = w.x; sh.pos[1] = w.y; sh.pos[2] = w.z;
+    var m = schMeshFor(sh.id);
+    if (m) m.position.set(sh.pos[0], sh.pos[1], sh.pos[2]);
+    return true;
+  }
+  if (SC.sub !== "object" && SC.subSel) return false;
+  var all = [];
+  for (var i = 0; i < sh.V.length; i++) all.push(i);
+  var c = selCentroid(sh);
+  if (key === "rot") {
+    if (!sh.rot) sh.rot = [0, 0, 0];
+    var d = v - (sh.rot[ax] || 0);
+    if (!d) return false;
+    rotateVerts(sh, all, axisById(XYZL[ax].toLowerCase()).v, d * Math.PI / 180, c);
+    sh.rot[ax] = v;
+    regeom(sh);
+    return true;
+  }
+  if (v <= 0) return false;
+  var cur = schXform(sh).size[ax];
+  if (!(cur > 0)) return false;
+  scaleVertsAxis(sh, all, XYZL[ax].toLowerCase(), v / cur, c);
+  regeom(sh);
+  return true;
+}
+
+// The transform block is spliced in above whatever the kind-specific panel
+// built, rather than pasted into each of the four branches below — one place to
+// change, and no way for a branch to be forgotten.
 function renderProps() {
+  renderPropsBody();
+  var it = state.selected != null ? findItem(state.selected) : null;
+  if (!it) return;
+  var box = document.getElementById("props");
+  box.insertAdjacentHTML("afterbegin", xformHTML(cityXform(it)));
+  wireXform(box, function (key, ax, v) {
+    if (!cityXformSet(it, key, ax, v)) return false;
+    cityRegeom(it);
+    buildHandles();
+    markSelected(it.id);
+    renderLegend();
+    save();
+    renderProps();
+  });
+}
+
+function renderPropsBody() {
   var box = document.getElementById("props");
   var it = state.selected != null ? findItem(state.selected) : null;
   if (!it) { box.innerHTML = '<p class="empty">მონიშნე ობიექტი, რომ შეცვალო სიმაღლე.</p>'; return; }
@@ -4316,6 +4549,7 @@ function schSubtract(a, b) {
   if (!g.F.length) return false;
   a.V = g.V; a.F = g.F; a.pos = [0, 0, 0];
   a.kind = "mesh"; a.shade = "flat"; a.seg = 0;
+  a.rot = [0, 0, 0];        // the result is a new solid; its old angle meant the old shape
   return true;
 }
 
@@ -4771,6 +5005,14 @@ function gizmoMove(ev) {
     var da = wantA - d.applied;
     if (da) {
       rotateVerts(sh, d.idx, d.axis, da, d.origin);
+      // Keep the ბრუნვა boxes honest: a shape turned by dragging has to read
+      // back the angle it was turned to. Only in object mode — turning one face
+      // is not turning the shape.
+      if (SC.sub === "object" || !SC.subSel) {
+        if (!sh.rot) sh.rot = [0, 0, 0];
+        var ri = d.axisId === "x" ? 0 : d.axisId === "y" ? 1 : 2;
+        sh.rot[ri] = (sh.rot[ri] || 0) + da * 180 / Math.PI;
+      }
       d.applied = wantA;
       regeom(sh);
     }
@@ -5410,6 +5652,7 @@ function schRenderPanel() {
            '<input type="color" id="shColorI" value="' + shColor(sh) + '">' +
            '<button class="mini" id="shColorX"' + (sh.color ? "" : " disabled") +
            ' title="ფერი კვლავ ლეგენდიდან">ლეგენდას</button></div>';
+    h += xformHTML(schXform(sh));
     var what = SC.subSel ? SUBMODES.filter(function (s) { return s.id === SC.subSel.type; })[0] : null;
     h += '<div class="row"><label>' + (what ? what.ka : "ფიგურა") + '</label>' +
          '<button class="mini" id="scDn">−</button><button class="mini" id="scUp">+</button>' +
@@ -5474,6 +5717,13 @@ function schRenderPanel() {
         ? "პროგრამა სრულია."
         : missing + " პუნქტი ჯერ არ არის გეგმაზე.") + "</p></section>";
   box.innerHTML = h;
+
+  if (sh) wireXform(box, function (key, ax, v) {
+    if (!schXformSet(sh, key, ax, v)) return false;
+    schRefreshHelpers();
+    schSave();
+    schRenderPanel();
+  });
 
   wireViewLight("", schRenderPanel);
   var nm = document.getElementById("schName");
@@ -5947,7 +6197,10 @@ if (/[?&]debug=1/.test(location.search)) {
                       schSubtract: schSubtract, schRebuild: schRebuild, schItems: schItems,
                       setTab: setTab, SClight: SC.light, applyLighting: applyLighting,
                       terrainAt: terrainAt, siteRing: siteRing,
-                      objRoot: objRoot, items: items, rebuild: rebuild, scene: scene };
+                      objRoot: objRoot, items: items, rebuild: rebuild, scene: scene,
+                      // the city's own selection, so the ქალაქი panel can be driven
+                      // from outside the way schSelect already drives the studio's
+                      select: select, renderProps: renderProps, schRenderPanel: schRenderPanel };
 }
 
 // ?selftest=1 asserts pan direction. Panning is grab-the-world: the ground must
@@ -6550,6 +6803,58 @@ if (/[?&]selftest=1/.test(location.search)) {
   want("rotation keeps the selection centre",
        (Math.abs(nc[0]+rc.pos[0]-cen.x) < 0.001 && Math.abs(nc[2]+rc.pos[2]-cen.z) < 0.001)
        ? "yes" : "no", "yes");
+
+  // ---- transform type-in ------------------------------------------------
+  // The axis frame the boxes present is Max's, not three.js's. If these two
+  // ever disagree, a student typing a northing sends the shape underground.
+  var uw = uiFromWorld(3, 9, -4);
+  want("world -> UI: X stays X", uw[0], 3);
+  want("world -> UI: north is -Z", uw[1], 4);
+  want("world -> UI: up is Y", uw[2], 9);
+  var wb = uiToWorld([3, 4, 9]);
+  want("UI -> world round trips",
+       (wb.x === 3 && wb.y === 9 && wb.z === -4) ? "yes" : "no", "yes");
+
+  // Typing a figure has to land on that figure, not near it.
+  var ts = { id: -71, kind: "box", pos: [0, 0, 0], V: pBox(10, 4, 6).V, F: pBox(10, 4, 6).F };
+  var keepSub = SC.sub, keepSel = SC.subSel;
+  SC.sub = "object"; SC.subSel = null;
+  schXformSet(ts, "pos", 1, 25);                    // 25 m north
+  want("typed northing goes to -Z in world", ts.pos[2], -25);
+  want("typed northing reads back as north", schXform(ts).pos[1], 25);
+  schXformSet(ts, "size", 0, 20);                   // 10 m wide -> 20
+  want("typed width is the width you get",
+       Math.abs(schXform(ts).size[0] - 20) < 0.001 ? "yes" : "no", "yes");
+  want("sizing one axis leaves the others",
+       Math.abs(schXform(ts).size[2] - 4) < 0.001 ? "yes" : "no", "yes");
+  schXformSet(ts, "rot", 2, 90);
+  want("typed angle is recorded", ts.rot[2], 90);
+  want("typing the same angle twice does nothing",
+       schXformSet(ts, "rot", 2, 90), false);
+  // ...and the shape actually turned: 20 wide by 6 deep, turned 90 about up
+  want("a 90 deg turn swaps width and depth",
+       Math.abs(schXform(ts).size[0] - 6) < 0.001 ? "yes" : "no", "yes");
+  SC.sub = keepSub; SC.subSel = keepSel;
+
+  // A city area has no angle field of its own, so ბრუნვა would have nothing to
+  // show unless cityRotate keeps the running total for every kind.
+  var ca = { id: -72, kind: "area", type: "sacx", pts: [[0,0],[10,0],[10,10],[0,10]] };
+  cityRotate(ca, Math.PI / 2);
+  want("an area records the angle it was turned", Math.round(degOf(ca.rot)), 90);
+  want("and its points really turned",
+       Math.abs(ca.pts[1][1] - 10) < 0.001 ? "yes" : "no", "yes");
+  cityRotate(ca, -Math.PI / 2);
+  want("turning back returns to zero", Math.round(degOf(ca.rot)), 0);
+
+  // A mass is placed by its centre, and the box has to set that centre.
+  var cz = { id: -73, kind: "zone", type: "sacx", x: 0, z: 0, w: 30, d: 20, h: 7, rot: 0 };
+  cityXformSet(cz, "pos", 0, 40);
+  cityXformSet(cz, "pos", 1, 15);
+  want("a typed easting moves the mass", cz.x, 40);
+  want("a typed northing negates for world Z", cz.z, -15);
+  cityXformSet(cz, "size", 1, 50);
+  want("a typed depth is taken literally", cz.d, 50);
+  want("a zero size is refused", cityXformSet(cz, "size", 1, 0), false);
 
   } catch (e) {
     out.push("ERR  " + (e && e.stack ? e.stack.split("\n")[0] : e));
