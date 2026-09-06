@@ -81,7 +81,7 @@ To rebuild the ground textures from source (needs internet):
 
     bash data/make-maps.sh
 
-`?selftest=1` runs 195 assertions in the page and prints the results over it. Run it
+`?selftest=1` runs 210 assertions in the page and prints the results over it. Run it
 before shipping a build, and run it on `bekura3d.html` rather than on `app.html`:
 the bundle is what students open, and three of the assertions need the ground
 textures that only the bundle carries inline.
@@ -297,6 +297,23 @@ trade to revisit if the classroom machines turn out to have room for it.
   programme checklist below reads the brief, not the team's names, so it still catches a
   missing sports field even before anything is named. შეღებვა paints a shape; ფერის აღება is
   an eyedropper that lifts the colour off another shape.
+- **ფერი — a colour of your own.** Every selected object has a **ფერი** row in the right
+  panel with a native RGB picker, on all four tabs: shapes and zone outlines and paths in the
+  studio, and masses, ფიგურა, zone polygons and roads in ქალაქი. The picker starts on the
+  colour the object is already showing, so the first drag is a change from where the student
+  is. **ლეგენდას** (studio) and **ზონას** / **ბილიკს** (city) hand it back, and stay greyed
+  out until there is something to hand back. With several objects selected the picker changes
+  all of them at once, like დუბლიკატი and წაშლა.
+  The override is presentation only — **the legend still decides what an object *is***. The
+  swatch counts and the ᲞᲠᲝᲒᲠᲐᲛᲐ checklist key on the legend entry and never on the colour, so
+  a recoloured shape still ticks its programme item, and the city's m², shares and სიმჭიდროვე
+  still bucket by ზონა. Both halves say how many objects have stepped away from the key:
+  `N ობიექტი საკუთარი ფერითაა` under the studio legend, `N ფერშეცვლილი` in the city totals.
+  Changing an object's ზონა or ლეგენდა drops its override, so a block moved to another
+  category cannot keep a colour that now misreports it. **თეთრი მასები** still wins over a
+  picked colour — it is a whole-view study mode and it hides the colour rather than losing
+  it; the panel says so while it is on. The paint bucket and the eyedropper stay საბაზისო
+  only: painting by hand is how a team would skip the legend altogether.
 - **დუბლიკატი (Ctrl+D).** Copies the selected shape two metres off and selects the copy, so
   pressing it four times gives a row. The city tab has the same shortcut on masses, zone
   polygons and paths, offset 15 m instead of 2. Day 3 Block 2 needs rows of small masses

@@ -460,7 +460,7 @@
          <span class="vi">⬟</span>საზღვარი</button>
      </div>
      <div class="vrow" style="margin-top:7px">
-       <button class="vbtn" id="masswhitebtn" title="მოცულობები თეთრად, ზონის ფერის ნაცვლად">
+       <button class="vbtn" id="masswhitebtn" title="მოცულობები თეთრად, ფერის ნაცვლად">
          <span class="vi">◻</span>თეთრი მასები</button>
        <button class="vbtn" id="humanbtn" title="1,75 მ სიმაღლის ადამიანი. ადგილს მარცხენა პანელის ხელსაწყოთი ირჩევ">
          <span class="vi">☖</span>ადამიანი</button>
@@ -583,6 +583,17 @@ ZONES.forEach(function (z) { zoneById[z.id] = z; });
 // A city model saved before the zones were rewritten still has to open rather
 // than throw on a type that no longer exists.
 function zoneOf(id) { return zoneById[id] || ZONES[0]; }
+
+// A city object's colour: its own if it has been given one, otherwise its
+// category's. The override is a property of the object, so it travels with the
+// plan through save, undo, დუბლიკატი and the file format with no serialiser
+// work at all. A ბილიკი has no ზონა, so it falls back to ბილიკი's own colour —
+// zoneOf would hand it the first zone's sand yellow instead. This says nothing
+// about თეთრი მასები: that is a view mode, applied where the volumes are built.
+function cityColor(it) {
+  if (it && it.color) return it.color;
+  return (it && it.kind === "path") ? PATH.color : zoneOf(it ? it.type : null).color;
+}
 
 // Storage keys, and the bridge from the ones the app used when it was called
 // მაკეტი. A workshop laptop that already holds a team's plan must adopt it on
@@ -1477,7 +1488,10 @@ function clearRoot() {
 // The statutory zone itself: an area on the ground, no height. Height arrives
 // later, at massing, as a separate object placed on top of it.
 function makeAreaMesh(it) {
-  var col = new THREE.Color(zoneOf(it.type).color);
+  // col feeds both the fill and the outline ribbon below, so the two can never
+  // disagree. Read here rather than tinted afterwards, because cityRegeom
+  // rebuilds this mesh from scratch on every corner drag.
+  var col = new THREE.Color(cityColor(it));
   // 0.9: over თეთრი ფონი's sheet at 0.7. 10 m triangles for the same reason
   // the sheet has them — the gap between the two is 20 cm, and a triangle
   // spanning two 14 m heightfield cells sags further than that.
@@ -1498,7 +1512,9 @@ function makeAreaMesh(it) {
 }
 
 function makeZoneMesh(it) {
-  var col = new THREE.Color(state.massWhite ? 0xEDEDED : zoneOf(it.type).color);
+  // The white toggle stays in front: it is a whole-view study mode, and it
+  // hides a picked colour rather than losing it — one click brings it back.
+  var col = new THREE.Color(state.massWhite ? 0xEDEDED : cityColor(it));
   var g = new THREE.BoxGeometry(it.w, it.h, it.d);
   var m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: col }));
   m.position.set(it.x, terrainAt(it.x, it.z) + it.h / 2 + liftOf(it), it.z);
@@ -1548,7 +1564,7 @@ function storeyLines(it) {
 // builder the studio uses, so a box is a box in both halves; only the colouring
 // is the city's — zone hue, or white when the white toggle is on.
 function makeShapeMesh(it) {
-  var col = new THREE.Color(state.massWhite ? 0xEDEDED : zoneOf(it.type).color);
+  var col = new THREE.Color(state.massWhite ? 0xEDEDED : cityColor(it));
   var g = schBuildGeometry(it);
   var m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: col }));
   m.position.set(it.pos[0], terrainAt(it.pos[0], it.pos[2]) + liftOf(it), it.pos[2]);
@@ -1570,7 +1586,7 @@ function makePathMesh(it) {
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
   var m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({
-    color: new THREE.Color(PATH.color), side: THREE.DoubleSide
+    color: new THREE.Color(cityColor(it)), side: THREE.DoubleSide
   }));
   m.userData.id = it.id;
   return m;
@@ -1850,6 +1866,9 @@ window.addEventListener("pointermove", function (ev) {
     preview.visible = w > 1 && d > 1;
     preview.scale.set(Math.max(w, 0.1), FLOOR * 2, Math.max(d, 0.1));
     preview.position.set((p.x + drag.start.x) / 2, FLOOR, (p.z + drag.start.z) / 2);
+    // Not cityColor(): nothing has been created yet, so there is no object to
+    // carry an override. The band shows the category of the ground it will
+    // land on, which is the only thing known while the pointer is still down.
     preview.material.color.set(state.massWhite
       ? 0xEDEDED : zoneOf(zoneAtPoint(drag.start.x, drag.start.z)).color);
   } else if (drag.mode === "vtx") {
@@ -2700,6 +2719,72 @@ function primName(id) {
 var DUPBTN = '<button class="mini" id="dup" title="Ctrl+D" ' +
              'style="width:100%;margin-bottom:6px">დუბლიკატი</button>';
 
+// ---------------------------------------------------------------- ფერი, ქალაქში
+// The same control the studio carries, in all four property panels: a native
+// picker seeded with what the object is already showing, so the first drag is a
+// change from where the student is, and a reset that is dead until there is
+// something to undo. The default here comes from the ზონა, not from a legend a
+// team wrote itself, so the reset says ზონას — and a ბილიკი has no ზონა at all,
+// which is why the label is asked for by kind rather than assumed.
+function cityColorRow(it) {
+  var road = it.kind === "path";
+  var any = citySelIds().some(function (q) { var o = findItem(q); return o && o.color; });
+  return '<div class="row"><label>ფერი</label>' +
+         '<input type="color" id="cColorI" value="' + cityColor(it) + '">' +
+         '<button class="mini" id="cColorX"' + (any ? "" : " disabled") +
+         ' title="ფერი კვლავ ' + (road ? "ბილიკიდან" : "ზონიდან") + '">' +
+         (road ? "ბილიკს" : "ზონას") + '</button></div>' +
+         (state.massWhite && (it.kind === "zone" || it.kind === "shape")
+           ? '<p class="empty" style="margin:-2px 0 8px">თეთრი მასები ჩართულია — ' +
+             'ფერი გამოჩნდება, როცა გამორთავ.</p>' : "");
+}
+
+// Repaint the live mesh without rebuilding the scene. An area is the only kind
+// whose outline shares the fill's colour; on a mass or a ფიგურა children[0] is
+// the white silhouette that markSelected drives, and it stays white. Never
+// traverse: the storey lines hang off the same mesh and share one module-level
+// material with every other block on the map.
+function cityRecolor(it) {
+  var m = meshFor(it.id);
+  if (!m || !m.material) return;
+  if (state.massWhite && (it.kind === "zone" || it.kind === "shape")) return;
+  m.material.color.set(cityColor(it));
+  if (it.kind === "area" && m.children[0] && m.children[0].material)
+    m.children[0].material.color.set(cityColor(it));
+}
+
+// Dragging inside a colour picker fires input on every pixel of movement, and
+// save() commits an undo snapshot of both halves — the same trap the სართული
+// slider hit. So input repaints the meshes and nothing else, and the commit
+// waits for change, which fires once when the picker closes. The whole
+// selection, because the banner at the top of the panel says how many are
+// marked and დუბლიკატი and წაშლა already act on all of them.
+function wireCityColor(it) {
+  var ci = document.getElementById("cColorI");
+  if (ci) {
+    ci.oninput = function () {
+      var v = this.value;
+      citySelIds().forEach(function (q) {
+        var o = findItem(q); if (!o) return;
+        o.color = v; cityRecolor(o);
+      });
+    };
+    ci.onchange = function () {
+      var v = this.value;
+      citySelIds().forEach(function (q) { var o = findItem(q); if (o) o.color = v; });
+      renderLegend(); renderProps(); save();
+    };
+  }
+  var cx = document.getElementById("cColorX");
+  if (cx) cx.onclick = function () {
+    citySelIds().forEach(function (q) {
+      var o = findItem(q); if (!o) return;
+      delete o.color; cityRecolor(o);
+    });
+    renderLegend(); renderProps(); save();
+  };
+}
+
 // ---------------------------------------------------------------- multiple selection
 // Ctrl+click adds to the selection and Ctrl+clicking a selected object takes it
 // out again; a plain click still replaces the whole set, which is what a student
@@ -2960,6 +3045,10 @@ function clipToStudio(o, src) {
            pos: [0, 0, 0],
            V: JSON.parse(JSON.stringify(g.V)), F: JSON.parse(JSON.stringify(g.F)),
            seg: o.seg || 0, shade: o.shade || "flat",
+           // These two are the only field-by-field item builders in the file,
+           // so a picked colour has to be listed by name here or Ctrl+V loses
+           // what Ctrl+D keeps. Both halves read .color the same way.
+           color: o.color || undefined,
            rot: (src === "studio" && o.rot) ? o.rot.slice() : [0, 0, 0] };
 }
 
@@ -2974,7 +3063,8 @@ function clipToCity(o, src) {
                  ? findItem(state.selected).type : ZONES[0].id,
            pos: [0, 0, 0],
            V: JSON.parse(JSON.stringify(o.V)), F: JSON.parse(JSON.stringify(o.F)),
-           seg: o.seg || 0, shade: o.shade || "flat", rot: 0 };
+           seg: o.seg || 0, shade: o.shade || "flat", color: o.color || undefined,
+           rot: 0 };
 }
 
 // ---- paste ---------------------------------------------------------------
@@ -3298,6 +3388,7 @@ function renderPropsBody() {
     box.innerHTML =
       '<div class="row"><label>ზონა</label>' +
       '<select id="az" style="flex:1;min-width:0">' + opts + '</select></div>' +
+      cityColorRow(it) +
       '<div class="row"><label>ფართობი</label><span class="val auto">' +
       fmtArea(ringArea(it.pts)) + '</span></div>' +
       '<div class="row"><label>წილი</label><span class="val auto">' +
@@ -3311,13 +3402,14 @@ function renderPropsBody() {
       DUPBTN +
       '<button class="danger" id="del">ზონის წაშლა</button>';
     document.getElementById("az").onchange = function () {
-      it.type = this.value;
+      it.type = this.value; delete it.color;
       rebuild(); select(it.id); save();
     };
     var dp = document.getElementById("delpt");
     if (dp) dp.onclick = function () { removeAreaPoint(); };
     document.getElementById("dup").onclick = function () { cityClone(); };
     document.getElementById("del").onclick = function () { removeItem(it.id); };
+    wireCityColor(it);
     return;
   }
   if (it.kind === "shape") {
@@ -3332,13 +3424,15 @@ function renderPropsBody() {
       (((Math.round((it.rot || 0) * 180 / Math.PI) % 360) + 360) % 360) + '°</span></div>' +
       '<div class="row"><label>ზონა</label>' +
       '<select id="sz" style="flex:1;min-width:0">' + zopts + '</select></div>' +
+      cityColorRow(it) +
       DUPBTN +
       '<button class="danger" id="del">წაშლა</button>';
     document.getElementById("sz").onchange = function () {
-      it.type = this.value; rebuild(); select(it.id); save();
+      it.type = this.value; delete it.color; rebuild(); select(it.id); save();
     };
     document.getElementById("dup").onclick = function () { cityClone(); };
     document.getElementById("del").onclick = function () { removeItem(it.id); };
+    wireCityColor(it);
     return;
   }
   if (it.kind === "path") {
@@ -3350,6 +3444,7 @@ function renderPropsBody() {
       Math.round(pathLength(it)).toLocaleString() + ' მ</span></div>' +
       '<div class="row"><label>ფართობი</label><span class="val auto">' +
       Math.round(pathLength(it) * it.width).toLocaleString() + ' მ²</span></div>' +
+      cityColorRow(it) +
       DUPBTN +
       '<button class="danger" id="del">წაშლა</button>';
     // Deliberately NOT rebuild(): that ends in renderProps(), which replaces
@@ -3378,10 +3473,14 @@ function renderPropsBody() {
       (((Math.round((it.rot || 0) * 180 / Math.PI) % 360) + 360) % 360) + '°</span></div>' +
       '<div class="row"><label>ზონა</label>' +
       '<select id="mz" style="flex:1;min-width:0">' + zoneOptions(it.type) + '</select></div>' +
+      cityColorRow(it) +
       DUPBTN +
       '<button class="danger" id="del">წაშლა</button>';
     document.getElementById("mz").onchange = function () {
-      it.type = this.value; rebuild(); select(it.id); save();
+      // Drop the override with the category, the way the studio's ლეგენდა
+      // dropdown does. Otherwise a block moved to another zone keeps the old
+      // colour and quietly reports itself as something it is not.
+      it.type = this.value; delete it.color; rebuild(); select(it.id); save();
     };
     document.getElementById("fl").oninput = function () {
       it.h = +this.value * FLOOR;
@@ -3404,6 +3503,9 @@ function renderPropsBody() {
   }
   document.getElementById("dup").onclick = function () { cityClone(); };
   document.getElementById("del").onclick = function () { removeItem(it.id); };
+  // Reached only by the ბილიკი and the mass: the ზონა and ფიგურა branches
+  // return above and wire their own, so nothing is registered twice.
+  wireCityColor(it);
 }
 
 // The city half needs the same superpower the school studio has. A district is
@@ -3485,8 +3587,9 @@ function updateCtxUI() {
 
 // ---------------------------------------------------------------- legend
 function renderLegend() {
-  var zoned = {}, massed = {}, gfa = 0, pathLen = 0, pathW = [];
+  var zoned = {}, massed = {}, gfa = 0, pathLen = 0, pathW = [], ownN = 0;
   items().forEach(function (it) {
+    if (it.color) ownN++;
     if (it.kind === "area") {
       zoned[it.type] = (zoned[it.type] || 0) + ringArea(it.pts);
     } else if (it.kind === "zone") {
@@ -3553,6 +3656,11 @@ function renderLegend() {
     // storey slider is for. Against the drawn territory, like every other share.
     parts.push("სიმჭიდროვე " + (gfa / den0).toFixed(2));
   }
+  // The rows above bucket strictly by ზონა and paint their swatch from the
+  // zone, so an object given its own colour sits under a swatch it no longer
+  // matches. The areas and shares stay honest — they read .type — but the key
+  // does not, and a team reading its own plan deserves to be told how many.
+  if (ownN > 0) parts.push(ownN + " ფერშეცვლილი");
   document.getElementById("totals").innerHTML = parts.join(" · ");
 }
 
@@ -5307,9 +5415,12 @@ function legendById(id) {
 }
 // A shape's colour: its own if it has been given one, otherwise the legend's.
 // The override is a property of the shape, not of the tab, so a model keeps the
-// colours it was drawn with wherever it is opened. Only საბაზისო offers the
-// picker: on the school plan naming the six colours IS the exercise, and a
-// free palette would let a team skip it.
+// colours it was drawn with wherever it is opened. Every tab offers the picker.
+// Naming the six colours is still the exercise on the school plan, and it still
+// holds: the legend decides what a shape IS — the swatch counts and ᲞᲠᲝᲒᲠᲐᲛᲐ
+// both key on .legend — while this decides only what it looks like. The bucket
+// is the one thing that stays საბაზისო-only, because painting by hand is how a
+// team would skip the legend altogether.
 function shColor(sh) {
   return (sh && sh.color) ? sh.color : legendById(sh.legend).color;
 }
@@ -5625,6 +5736,15 @@ function schRebuild() {
 function schMeshFor(id) {
   for (var i = 0; i < SC.group.children.length; i++)
     if (SC.group.children[i].userData.id === id) return SC.group.children[i];
+  return null;
+}
+
+// The flat equivalent, so the colour picker can repaint one outline without
+// regenerating every draped mesh on the plan. userData.flatId is written by
+// schMakeFlatMesh on the fill, on its outline child and on a path ribbon.
+function schFlatMeshFor(id) {
+  for (var i = 0; i < SC.flatGroup.children.length; i++)
+    if (SC.flatGroup.children[i].userData.flatId === id) return SC.flatGroup.children[i];
   return null;
 }
 
@@ -7089,6 +7209,14 @@ function schRenderPanel() {
            legName(L) + "</option>";
     });
     h += '</select></div>';
+    // flatColor has honoured .color since outlines arrived, and the ლეგენდა
+    // dropdown just above already clears it — but nothing in the app ever wrote
+    // one. A flat is unreachable by the bucket and the eyedropper, which both
+    // raycast SC.group only, so the panel is the only door there can be.
+    h += '<div class="row"><label>ფერი</label>' +
+         '<input type="color" id="flColorI" value="' + flatColor(fl) + '">' +
+         '<button class="mini" id="flColorX"' + (fl.color ? "" : " disabled") +
+         ' title="ფერი კვლავ ლეგენდიდან">ლეგენდას</button></div>';
     h += '<button class="danger" id="flDel">წაშლა</button>';
     h += "</section>";
     box.innerHTML = h;
@@ -7101,6 +7229,27 @@ function schRenderPanel() {
       fl.legend = this.value; delete fl.color; schRebuild(); schSave();
     };
     document.getElementById("flDel").onclick = function () { schDeleteFlat(fl.id); };
+    // input repaints, change commits — the rule the shape picker follows. Never
+    // schRebuildFlats() from oninput: it regenerates draped geometry for every
+    // flat on the plan, once per pixel of pointer movement. A flat carries its
+    // outline ribbon as its only child and the two share one colour, so both are
+    // set, and the selected-flat brightening from schRebuildFlats is redone or
+    // the outline stops looking selected for the length of the drag.
+    var fci = document.getElementById("flColorI");
+    if (fci) {
+      fci.oninput = function () {
+        var v = this.value, fm = schFlatMeshFor(fl.id);
+        fl.color = v;
+        if (!fm || !fm.material) return;
+        fm.material.color.set(v);
+        if (fm.children[0] && fm.children[0].material) fm.children[0].material.color.set(v);
+        if (SC.flatSel === fl.id && fm.material.emissive === undefined)
+          fm.material.color.offsetHSL(0, 0, 0.18);
+      };
+      fci.onchange = function () { fl.color = this.value; schRebuild(); schSave(); };
+    }
+    var fcx = document.getElementById("flColorX");
+    if (fcx) fcx.onclick = function () { delete fl.color; schRebuild(); schSave(); };
     var nEl0 = document.getElementById("schName");
     if (nEl0) nEl0.onchange = function () { SC.planName = this.value; schSave(); };
     return;
@@ -7120,11 +7269,18 @@ function schRenderPanel() {
     // The picker starts on whatever the shape is already showing, so the first
     // drag is a change from where the student is, not a jump to an unrelated
     // colour. ლეგენდას hands it back and is dead until there is something to undo.
-    if (SC.activeDoc === "basic")
-      h += '<div class="row"><label>ფერი</label>' +
-           '<input type="color" id="shColorI" value="' + shColor(sh) + '">' +
-           '<button class="mini" id="shColorX"' + (sh.color ? "" : " disabled") +
-           ' title="ფერი კვლავ ლეგენდიდან">ლეგენდას</button></div>';
+    // On every tab, not only საბაზისო. What a shape IS still comes from the
+    // legend — the swatch counts above and the ᲞᲠᲝᲒᲠᲐᲛᲐ checklist below both
+    // key on .legend and never on the colour — so a colour picked here is
+    // presentation, and the ᲚᲔᲒᲔᲜᲓᲐ section says how many have taken one.
+    // Dead for the whole set, not just the last-clicked shape, or it renders
+    // disabled for exactly the mixed selection that needs it.
+    h += '<div class="row"><label>ფერი</label>' +
+         '<input type="color" id="shColorI" value="' + shColor(sh) + '">' +
+         '<button class="mini" id="shColorX"' +
+         (schSelIds().some(function (q) { var s = schFind(q); return s && s.color; })
+           ? "" : " disabled") +
+         ' title="ფერი კვლავ ლეგენდიდან">ლეგენდას</button></div>';
     var gids = schSelIds(), gmany = gids.length > 1;
     if (gmany)
       h += '<p class="empty" style="margin:0 0 8px"><b>' + gids.length +
@@ -7165,6 +7321,16 @@ function schRenderPanel() {
          (L.ka || "").replace(/"/g, "&quot;") + '">' +
          '<span class="cnt">' + (used[L.id] || 0) + "</span></div>";
   });
+  // A shape that has been given its own colour still belongs to its legend
+  // entry — the swatch counts above and the ᲞᲠᲝᲒᲠᲐᲛᲐ list below both key on
+  // .legend, never on the colour. Said out loud so a trainer can see at a
+  // glance how far a team has stepped away from its own key.
+  var ownN = 0;
+  schItems().forEach(function (s) { if (s.color) ownN++; });
+  schFlats().forEach(function (s) { if (s.color) ownN++; });
+  if (ownN > 0)
+    h += '<p class="empty">' + ownN + ' ობიექტი საკუთარი ფერითაა. ლეგენდა მათ ' +
+         'მაინც ითვლის.</p>';
   h += "</section>";
 
   // საბაზისო is where the tools are learned, not where a masterplan is read, so
@@ -7178,8 +7344,8 @@ function schRenderPanel() {
          '" id="freeSw" title="შეღებვა ამ ფერით" style="background:' + SC.paintColor + '"></button>' +
          '<input type="color" id="freeC" value="' + SC.paintColor + '">' +
          '<span class="cnt">' + freeN + '</span></div>' +
-         '<p class="empty">აქ ფერი თავისუფალია. სკოლის გეგმაზე კი ყოველი ფერი ' +
-         'მნიშვნელობას ატარებს.</p></section>';
+         '<p class="empty">აქ მთელი პალიტრა თავისუფალია. სკოლის გეგმაზე ფერს ' +
+         'ლეგენდა იძლევა და ცალკეული გამონაკლისი ლეგენდას არ ცვლის.</p></section>';
   }
 
   h += '<section><h3>ᲞᲠᲝᲒᲠᲐᲛᲐ</h3>';
@@ -7296,19 +7462,32 @@ function schRenderPanel() {
 
   // Dragging inside a colour picker fires input on every pixel of movement.
   // schRebuild would replace the input mid drag and schSave would fill the undo
-  // history with one colour change, so input repaints the single mesh and the
+  // history with one colour change, so input repaints the meshes and the
   // commit waits for change, which fires once when the picker closes.
+  // The whole selection, not the last-clicked shape: the banner two rows up
+  // says how many are marked, and დუბლიკატი and წაშლა already act on all of them.
   var ci = document.getElementById("shColorI");
   if (ci) {
     ci.oninput = function () {
-      sh.color = this.value;
-      var m = schMeshFor(sh.id);
-      if (m) m.material.color.set(this.value);
+      var v = this.value;
+      schSelIds().forEach(function (q) {
+        var s = schFind(q); if (!s) return;
+        s.color = v;
+        var m = schMeshFor(q);
+        if (m) m.material.color.set(v);
+      });
     };
-    ci.onchange = function () { sh.color = this.value; schRebuild(); schSave(); };
+    ci.onchange = function () {
+      var v = this.value;
+      schSelIds().forEach(function (q) { var s = schFind(q); if (s) s.color = v; });
+      schRebuild(); schSave();
+    };
   }
   var cx = document.getElementById("shColorX");
-  if (cx) cx.onclick = function () { delete sh.color; schRebuild(); schSave(); };
+  if (cx) cx.onclick = function () {
+    schSelIds().forEach(function (q) { var s = schFind(q); if (s) delete s.color; });
+    schRebuild(); schSave();
+  };
 
   var fs = document.getElementById("freeSw");
   if (fs) fs.onclick = function () {
@@ -7471,11 +7650,13 @@ function schImportFile(f) {
       Object.keys(docs).forEach(function (k) {
         docs[k].legend = legendMigrate(docs[k].legend);
         if (!docs[k].data) docs[k].data = { A: [], B: [] };
+        if (!docs[k].flat) docs[k].flat = { A: [], B: [] };
       });
       SC.docs = docs;
       SC.activeDoc = o.active === "basic" ? "basic" : "school";
       var d = SC.docs[SC.activeDoc];
       SC.data = d.data; SC.legend = d.legend; SC.planName = d.planName || "";
+      SC.flat = d.flat || (d.flat = { A: [], B: [] });     // as in schLoad
       SC.nextId = d.nextId || 1; SC.variant = d.variant || "A";
       SC.sel = null; SC.subSel = null;
       if (o.city) {                       // the city half of the file
@@ -7520,7 +7701,12 @@ function schLoad() {
     SC.activeDoc = o.active === "basic" ? "basic" : "school";
     var d = SC.docs[SC.activeDoc];
     Object.keys(SC.docs).forEach(function (k) { SC.docs[k].legend = legendMigrate(SC.docs[k].legend); });
+    // SC.flat has to be re-pointed with SC.data, not left on the empty document
+    // this boot started from: flushDoc writes SC.flat back into the active doc,
+    // so a stale pointer does not merely fail to show the saved outlines and
+    // paths — it overwrites them with the empty list on the next save.
     SC.data = d.data; SC.legend = d.legend; SC.planName = d.planName;
+    SC.flat = d.flat || (d.flat = { A: [], B: [] });
     SC.nextId = d.nextId; SC.variant = d.variant;
     if (o.snap) SC.snap = o.snap;
     if (o.light) SC.light = o.light;
@@ -7722,6 +7908,24 @@ if (/[?&]selftest=1/.test(location.search)) {
   var _tab0 = state.tab;
   state.tab = "city";
   try {
+    // First, before anything below swaps documents around. schLoad used to set
+    // SC.data from the plan it had just loaded and leave SC.flat on the empty
+    // document the boot started from, so every saved ზონის კონტური and ხაზი
+    // ბილიკი was dropped on open and then overwritten with the empty list on
+    // the next save. Comparing the two pointers does NOT catch it — the first
+    // flushDoc makes them identical again, after the loss. So this reads what
+    // is actually on disk and counts. Read-only: the suite must never write a
+    // trainer's storage. Vacuously true on a laptop with nothing saved yet,
+    // which is the only honest thing to say there.
+    var _rawS = null, _savedFl = 0;
+    try { _rawS = localStorage.getItem(KEY.school); } catch (e) {}
+    if (_rawS) try {
+      var _plS = JSON.parse(_rawS);
+      var _dS = _plS && _plS.docs && _plS.docs[SC.activeDoc];
+      if (_dS && _dS.flat && _dS.flat[SC.variant]) _savedFl = _dS.flat[SC.variant].length;
+    } catch (e) {}
+    want("every outline this plan was saved with came back at boot",
+         (SC.flat[SC.variant] || []).length >= _savedFl ? "all" : "lost", "all");
   // ---- the save format, in both directions ----
   // These run on a scratch slot so a student's real plan is never the subject.
   var SLOT = "bekura3d-selftest";
@@ -8156,6 +8360,10 @@ if (/[?&]selftest=1/.test(location.search)) {
        shColor({ legend: "sport" }), "#E08A3C");
   want("a shape's own colour wins over the legend",
        shColor({ legend: "sport", color: "#123456" }), "#123456");
+  want("a zone outline with no colour of its own follows the legend",
+       flatColor({ legend: "sport" }), "#E08A3C");
+  want("a zone outline's own colour wins over the legend",
+       flatColor({ legend: "sport", color: "#123456" }), "#123456");
   SC.legend = _legSave;
   var _docs2 = JSON.stringify(SC.docs), _act2 = SC.activeDoc, _data2 = SC.data;
   SC.docs = { school: newDoc(), basic: newDoc(), scan: newScanDoc() };
@@ -8166,6 +8374,79 @@ if (/[?&]selftest=1/.test(location.search)) {
        SC.paintFree ? "free" : "legend", "legend");
   SC.docs = JSON.parse(_docs2); SC.activeDoc = _act2; SC.data = _data2;
   SC.legend = _legSave; SC.paintFree = _freeSave;
+
+  // ---- the live document's outline list ------------------------------------
+  // schLoad set SC.data from the document it had just loaded but left SC.flat
+  // on the empty one the boot started from. flushDoc then wrote that empty list
+  // back, so every ზონის კონტური and ხაზი ბილიკი a team had saved was destroyed
+  // on the first save after reopening. The boot-state half of this invariant is
+  // asserted at the top of the suite, before anything here swaps documents.
+  var _fDocs = JSON.stringify(SC.docs), _fAct = SC.activeDoc, _fData = SC.data,
+      _fFlat = SC.flat, _fLeg = SC.legend, _fVar = SC.variant,
+      _fName = SC.planName, _fNext = SC.nextId,
+      _fFree = SC.paintFree, _fSel = SC.sel, _fFSel = SC.flatSel;
+  SC.docs = { school: newDoc(), basic: newDoc(), scan: newScanDoc() };
+  SC.docs.school.flat.A.push({ id: 1, kind: "area", legend: "green",
+                               pts: [[0, 0], [10, 0], [10, 10], [0, 10]] });
+  SC.activeDoc = "school";
+  SC.data = SC.docs.school.data; SC.flat = SC.docs.school.flat;
+  SC.legend = SC.docs.school.legend; SC.variant = "A";
+  SC.planName = ""; SC.nextId = 2;
+  flushDoc();
+  want("a reopened plan's outlines survive the first save",
+       SC.docs.school.flat.A.length, 1);
+  useDoc("basic"); useDoc("school");
+  want("and they survive a trip through another tab",
+       SC.flat.A.length, 1);
+  SC.docs = JSON.parse(_fDocs); SC.activeDoc = _fAct; SC.data = _fData;
+  SC.flat = _fFlat; SC.legend = _fLeg; SC.variant = _fVar;
+  SC.planName = _fName; SC.nextId = _fNext;
+  SC.paintFree = _fFree; SC.sel = _fSel; SC.flatSel = _fFSel;
+
+  // ---- colour in ქალაქი ----------------------------------------------------
+  want("a city object with no colour of its own follows its zone",
+       cityColor({ kind: "zone", type: "green" }), "#6FAF63");
+  want("a city object's own colour wins over the zone",
+       cityColor({ kind: "zone", type: "green", color: "#123456" }), "#123456");
+  want("a road with no colour follows ბილიკი, not the first zone",
+       cityColor({ kind: "path" }), PATH.color);
+  want("a road's own colour wins",
+       cityColor({ kind: "path", color: "#123456" }), "#123456");
+  want("a zone id this build no longer knows still resolves",
+       cityColor({ kind: "zone", type: "sacx" }), ZONES[0].color);
+
+  var _mw0 = state.massWhite;
+  var _cit = { id: -1, kind: "zone", type: "green", color: "#123456",
+               x: 0, z: 0, w: 10, d: 10, h: 7, rot: 0 };
+  state.massWhite = true;
+  var _wm = makeZoneMesh(_cit);
+  want("თეთრი მასები beats a picked colour",
+       _wm.material.color.getHexString(), "ededed");
+  _wm.geometry.dispose();
+  state.massWhite = false;
+  var _cm = makeZoneMesh(_cit);
+  want("with the white toggle off the picked colour shows",
+       _cm.material.color.getHexString(), "123456");
+  want("and the silhouette edge stays white",
+       _cm.children[0].material.color.getHexString(), "ffffff");
+  _cm.geometry.dispose();
+  state.massWhite = _mw0;
+
+  // The fill and the 3 m ribbon round it are one colour in makeAreaMesh, so a
+  // recoloured zone must not end up outlined in the colour it used to be.
+  var _cc = siteRing(state.town)[0];
+  var _cam = makeAreaMesh({ id: -2, kind: "area", type: "green", color: "#123456",
+    pts: [[_cc[0] + 20, _cc[1] + 20], [_cc[0] + 220, _cc[1] + 10],
+          [_cc[0] + 240, _cc[1] + 190], [_cc[0] + 30, _cc[1] + 200]] });
+  want("a zone outline's ribbon follows its fill, not its old zone",
+       _cam.children[0].material.color.getHexString(), "123456");
+  _cam.geometry.dispose();
+
+  var _cpm = makePathMesh({ id: -3, kind: "path", width: 6, color: "#123456",
+    pts: [[_cc[0] + 20, _cc[1] + 20], [_cc[0] + 120, _cc[1] + 20]] });
+  want("a road takes the picked colour",
+       _cpm.material.color.getHexString(), "123456");
+  _cpm.geometry.dispose();
 
   // ---- the human for scale -------------------------------------------------
   var _hp0 = SC.humanG.position.clone();
