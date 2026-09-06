@@ -70,6 +70,19 @@ echo   Done. Close bekura3d.html and open it again.
 echo   The version under the update button in the app should have changed.
 echo   Your saved work is untouched.
 
+REM  A pull updates this clone. If the laptop also has the shared all-users copy
+REM  that install.cmd puts in Program Files, that copy is now the old build and
+REM  every student icon on the Desktop still opens it. Say so rather than letting
+REM  a whole room quietly run last week's version.
+set "SHARED=%ProgramW6432%\Bekura3D\bekura3d.html"
+if not defined ProgramW6432 set "SHARED=%ProgramFiles%\Bekura3D\bekura3d.html"
+if exist "%SHARED%" (
+  echo.
+  echo   NOTE: this laptop also has the shared copy that the Desktop icon opens:
+  echo     %SHARED%
+  echo   That one is still the old build. Run install.cmd again to refresh it.
+)
+
 :end
 echo.
 pause

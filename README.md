@@ -18,7 +18,35 @@ Copy it to a USB stick and it works on any machine in Akhmeta, Telavi or Gurjaan
 
     git clone https://github.com/gbekura/Bekura3D.git
 
-Then run **`setup.cmd`** once. It puts two shortcuts on the Desktop — **Bekura3D**
+Then pick one of the two setups.
+
+### A shared laptop, or a room of them — `install.cmd`
+
+Run **`install.cmd`** (or **`დაყენება.cmd`**, the same thing) once per machine. It
+copies `bekura3d.html` into `C:\Program Files\Bekura3D` and puts a **Bekura3D**
+shortcut on the **Public Desktop** and in the **All Users Start Menu**, so every
+account on the laptop — including ones created later — sees the icon and opens the
+same copy. A student never has to walk into a trainer's
+`Users\<name>\Documents\GitHub` folder to find a file, which is the whole point.
+
+**It asks for administrator rights, and it has to.** The Public Desktop and
+Program Files are the two places Windows shares between accounts, and both are
+closed to a standard user by design. There is no way to install for all users
+quietly. If you would rather not elevate, use `setup.cmd` below instead.
+
+Only `bekura3d.html` is copied — it is one self-contained file, so there is no
+install tree to keep in step. **Re-run `install.cmd` after every update**: it
+overwrites the shared copy, and `update.cmd` reminds you when that copy has gone
+stale. `uninstall.cmd` removes the folder and both shortcuts.
+
+**Saved work is never in the installed folder.** It lives in each Windows
+account's own browser storage, so it survives an install, an uninstall and a
+reinstall, and each account keeps its own. Two students sharing one Windows login
+share one set of work — give them separate logins if that matters.
+
+### One trainer's own laptop — `setup.cmd`
+
+Run **`setup.cmd`** once. It puts two shortcuts on the Desktop — **Bekura3D**
 and **განახლება** — and offers to register a `bekura3d://` scheme so the update
 button inside the app can start the updater. No admin rights; `remove.cmd` undoes
 the scheme, and the shortcuts are deleted by hand.
