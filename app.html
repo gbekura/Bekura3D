@@ -290,7 +290,22 @@
         text-transform:uppercase;margin:0 0 14px}
   #upd p{font-size:14.5px;line-height:1.55;color:rgba(255,255,255,.82);margin:0 0 12px}
   #upd p.small{font-size:13px;color:rgba(255,255,255,.55)}
+  /* Shown only when the button has actually been pressed and the shell had no
+     answer. Loud on purpose: the quiet version of this sentence was already on
+     the panel and was read as boilerplate, which is how a dead button survives. */
+  #upd p.warn{display:none}
+  #upd p.warn.on{display:block;font-size:13.5px;color:#FFC9C4;
+        background:rgba(224,58,47,.14);border:1px solid rgba(224,58,47,.45);
+        border-radius:9px;padding:10px 12px}
+  /* Same shape, but this one is an instruction rather than a failure. */
+  #upd p.note{display:none}
+  #upd p.note.on{display:block;font-size:13.5px;color:#BFF3F5;
+        background:rgba(51,190,196,.13);border:1px solid rgba(51,190,196,.42);
+        border-radius:9px;padding:10px 12px}
   #upd .path{display:flex;align-items:center;gap:8px;margin:14px 0}
+  /* The setup.cmd path rides with the red note and appears only with it. */
+  #upd #updsetup{display:none}
+  #upd #updsetup.on{display:flex;margin:10px 0 0}
   #upd code{flex:1;min-width:0;background:rgba(255,255,255,.07);
         border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:9px 11px;
         font-family:Consolas,monospace;font-size:12.5px;color:#CFE6E8;
@@ -500,12 +515,22 @@
     <p>დააჭირე ღილაკს. ბრაუზერი ნებართვას გკითხავს, მერე კონსოლი ახალ ვერსიას
        ჩამოტვირთავს. მერე ეს გვერდი დახურე და ისევ გახსენი.</p>
     <button class="mini" id="updgo" style="width:100%;padding:10px 0;margin:2px 0 14px">გაუშვი განახლება</button>
-    <p class="small">თუ არაფერი მოხდა, ეს ლეპტოპი ჯერ მომზადებული არაა: ერთხელ
+    <p class="small warn" id="updnote">ვერ გაეშვა — ამ ლეპტოპზე <b>setup.cmd</b> ჯერ
+       არ გაშვებულა, ამიტომ ღილაკს პასუხის გამცემი არავინ ჰყავს. გაუშვი ერთხელ და
+       შემდეგ ღილაკი უკვე იმუშავებს. სამუდამოდ. მისამართი დააკოპირე და ჩასვი
+       <b>Win+R</b>-ში:</p>
+    <div class="path" id="updsetup"><code id="updsetuppath">—</code>
+      <button class="mini" id="updsetupcopy" style="flex:none;padding:8px 14px">კოპირება</button></div>
+    <p class="small" id="updhint">თუ არაფერი მოხდა, ეს ლეპტოპი ჯერ მომზადებული არაა: ერთხელ
        გაუშვი <b>setup.cmd</b>. მანამდე კი დახურე გვერდი და ორმაგად დააწკაპუნე
        სამუშაო მაგიდაზე <b>განახლება</b>-ს, ან ამ ფაილს:</p>
     <div class="path"><code id="updpath">—</code>
       <button class="mini" id="updcopy" style="flex:none;padding:8px 14px">კოპირება</button></div>
     <p class="small">შენახული ნამუშევარი ადგილზე რჩება.</p>
+    <button class="mini" id="updlnk" style="width:100%;padding:9px 0;margin:2px 0 10px">მალსახმობი სამუშაო მაგიდისთვის</button>
+    <p class="small note" id="updlnknote">ჩამოიტვირთა <b>Bekura3D.url</b>. გადმოათრიე
+       ჩამოტვირთვების საქაღალდიდან სამუშაო მაგიდაზე — და მერე პროგრამა ერთი
+       ორმაგი დაწკაპუნებით იხსნება.</p>
     <div class="stamp" id="updstamp"></div>
     <button class="mini" id="updclose" style="width:100%;margin-top:16px">დახურვა</button>
   </div></div>
@@ -4258,6 +4283,16 @@ function showUpdate() {
   var cmd = dir ? dir + "\\განახლება.cmd"
                 : "git pull  &&  bash build.sh";
   document.getElementById("updpath").textContent = cmd;
+  // Reopening the panel is how a student retries, so the warning and the path
+  // both go back to their unpressed state — otherwise the second visit opens
+  // already shouting about a button nobody has pressed yet.
+  document.getElementById("updnote").classList.remove("on");
+  document.getElementById("updsetup").classList.remove("on");
+  document.getElementById("updlnknote").classList.remove("on");
+  document.getElementById("updsetuppath").textContent = dir ? dir + "\\setup.cmd" : "setup.cmd";
+  // Nothing to point a shortcut at when the page is served rather than opened
+  // from the folder: the .url would name a localhost that is not there tomorrow.
+  document.getElementById("updlnk").style.display = dir ? "" : "none";
   // A served copy has no folder to update and no scheme to call, so the button
   // would be a dead end; the git line above is the answer there.
   document.getElementById("updgo").style.display = dir ? "" : "none";
@@ -4275,8 +4310,54 @@ document.getElementById("updbtn").addEventListener("click", showUpdate);
 // If it has not, nothing happens and the path below the button is still there.
 // The navigation has to be a top-level one inside the click gesture: Chrome and
 // Edge refuse an external-protocol launch from a frame or without a gesture.
+// A failed external-protocol launch is silent in every browser: no throw, no
+// navigation, no event. So a laptop that has not run setup.cmd got a button that
+// did nothing AND said nothing, which is the worst of the three outcomes and the
+// one that gets reported as "the update is broken". Losing focus is the only
+// signal there is — the permission dialog, the console window and the shell all
+// take it. Still here and still focused a second and a half later means nothing
+// answered, and the panel says so and points at setup.cmd instead.
 document.getElementById("updgo").addEventListener("click", function () {
+  var left = false, had = document.hasFocus();
+  function gone() { left = true; }
+  window.addEventListener("blur", gone);
+  document.addEventListener("visibilitychange", gone);
   location.href = "bekura3d://update";
+  setTimeout(function () {
+    window.removeEventListener("blur", gone);
+    document.removeEventListener("visibilitychange", gone);
+    // Only treat "still focused" as proof of nothing happening if the page had
+    // focus to begin with. Testing hasFocus() alone reads an unfocused window
+    // as success and swallows the warning — which is the very failure this is
+    // here to catch. When there is no signal either way, say something: a
+    // needless line about setup.cmd costs a moment, a dead silent button costs
+    // the workshop.
+    if (left || (had && !document.hasFocus())) return;
+    // The updater's own path stays in the box above, untouched. Swapping it for
+    // setup.cmd took away the one line that already worked: copy it, paste it
+    // into a console, and the update runs whether or not the scheme is
+    // registered. setup.cmd gets its own row rather than the same one.
+    document.getElementById("updnote").classList.add("on");
+    document.getElementById("updsetup").classList.add("on");
+  }, 1500);
+});
+
+// A page cannot put a file on the Desktop any more than it can start a process:
+// it is the same sandbox wall the update button runs into. What it can do is
+// hand the file over. A .url is plain text — three lines — so it needs no
+// helper, no scheme and no setup.cmd, and the browser saves it to the downloads
+// folder for the student to drag across. setup.cmd still makes the real pair of
+// .lnk shortcuts; this is for the laptop where nobody has run it.
+document.getElementById("updlnk").addEventListener("click", function () {
+  var body = "[InternetShortcut]\r\nURL=" + location.href.replace(/[?#].*$/, "") +
+             "\r\nIconIndex=0\r\n";
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([body], { type: "application/octet-stream" }));
+  a.download = "Bekura3D.url";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  document.getElementById("updlnknote").classList.add("on");
 });
 
 // ---------------------------------------------------------------- controls
@@ -4414,24 +4495,31 @@ document.getElementById("updclose").addEventListener("click", function () {
 document.getElementById("updwrap").addEventListener("click", function (ev) {
   if (ev.target === this) this.classList.remove("on");
 });
-document.getElementById("updcopy").addEventListener("click", function () {
-  var txt = document.getElementById("updpath").textContent, b = this;
-  function done() { b.textContent = "დაკოპირდა"; setTimeout(function () {
-    b.textContent = "კოპირება"; }, 1400); }
-  // clipboard.writeText can be refused on an opaque file:// origin
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(txt).then(done, fallback);
-  } else fallback();
-  function fallback() {
-    var ta = document.createElement("textarea");
-    ta.value = txt;
-    ta.style.cssText = "position:fixed;opacity:0";
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand("copy"); done(); } catch (e) { /* nothing else to try */ }
-    document.body.removeChild(ta);
-  }
-});
+// Two paths can be on the panel at once — the updater, and setup.cmd when the
+// button could not reach the shell — so the copy is a function rather than one
+// handler bound to one box.
+function wireCopy(btnId, srcId) {
+  document.getElementById(btnId).addEventListener("click", function () {
+    var txt = document.getElementById(srcId).textContent, b = this;
+    function done() { b.textContent = "დაკოპირდა"; setTimeout(function () {
+      b.textContent = "კოპირება"; }, 1400); }
+    // clipboard.writeText can be refused on an opaque file:// origin
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(done, fallback);
+    } else fallback();
+    function fallback() {
+      var ta = document.createElement("textarea");
+      ta.value = txt;
+      ta.style.cssText = "position:fixed;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); done(); } catch (e) { /* nothing else to try */ }
+      document.body.removeChild(ta);
+    }
+  });
+}
+wireCopy("updcopy", "updpath");
+wireCopy("updsetupcopy", "updsetuppath");
 document.getElementById("gnd-map").addEventListener("click", function () { setGround("map"); });
 document.getElementById("gnd-sat").addEventListener("click", function () { setGround("sat"); });
 document.getElementById("whitebtn").addEventListener("click", toggleMapWhite);
