@@ -18,19 +18,36 @@ Copy it to a USB stick and it works on any machine in Akhmeta, Telavi or Gurjaan
 
     git clone https://github.com/gbekura/Bekura3D.git
 
-Then open `bekura3d.html`. To pick up a newer build later, **double-click
-`განახლება.cmd`** in the same folder. It pulls, and that is the whole update:
-the repository ships `bekura3d.html` already built, so there is nothing to
-compile. Close the page and open it again afterwards.
+Then run **`setup.cmd`** once. It puts two shortcuts on the Desktop — **Bekura3D**
+and **განახლება** — and offers to register a `bekura3d://` scheme so the update
+button inside the app can start the updater. No admin rights; `remove.cmd` undoes
+the scheme, and the shortcuts are deleted by hand.
+
+After that the update is: close the page, double-click **განახლება** on the
+Desktop, open **Bekura3D** again. That is the whole update — the repository ships
+`bekura3d.html` already built, so there is nothing to compile.
 
 The equivalent by hand:
 
     git pull
 
-The **განახლება** button in the app does not run that pull, and cannot. A page
-opened by double-click is a `file://` document with no shell and no filesystem;
-what the button does is tell you where the script is and print which commit the
-open page was built from, so you can see whether the pull landed.
+**About the განახლება button.** A page opened by double-click is a `file://`
+document with no shell, so it cannot start a process — no browser allows that,
+and it is the reason the update is a separate `.cmd` at all. What the button can
+do is hand Windows a URL. If `setup.cmd` registered the scheme on that laptop,
+Windows answers `bekura3d://update` by running `update.cmd` and the button really
+does update; if it did not, nothing happens and the panel still names the file.
+Expect the browser to ask permission every time — the remembered "always allow"
+is stored per origin and a `file://` page has none.
+
+The registered command runs `bekura3d-update.ps1` with `-File` and **no `%1`**.
+Any web page can navigate to `bekura3d://anything`, so nothing from the URL may
+reach a shell: with a parameterless `-File` script whatever Windows appends binds
+to nothing. Pointing the scheme at a `.cmd`, or switching to `-Command`, hands
+that text to `cmd.exe`'s batch parser instead — the BatBadBut class, CVE-2024-24576.
+**Before a workshop, test it once:** press the update button (a console should
+appear), then put `bekura3d://update"&calc&"` in the address bar and confirm
+Calculator does *not* open. If it does, run `remove.cmd` and use the shortcut.
 
 ## Where the buttons are
 
@@ -323,6 +340,11 @@ The legend and the area totals build themselves, so a team always knows how much
 site they have used, the number that makes them argue about density instead of guessing.
 
 ## Controls
+
+The **i** button in the header (or <kbd>F1</kbd>, or <kbd>?</kbd>) opens the full
+sheet inside the app: 35 gestures in six groups, with a drawn mouse showing which
+button each one means. It opens by itself the first time a browser ever runs the
+app, and never again. The short version:
 
 | Action | Mouse |
 |---|---|

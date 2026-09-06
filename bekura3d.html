@@ -299,6 +299,55 @@
   #upd .stamp{border-top:1px solid rgba(255,255,255,.12);margin-top:16px;padding-top:12px;
         font-size:12.5px;color:rgba(255,255,255,.5)}
   #upd .stamp b{color:var(--cyan);font-family:Consolas,monospace}
+
+  /* The control list. Same panel as the update box, so the two read as one
+     object, but long enough to need a scroller — the caption and the closing
+     line are pinned and only the middle moves. 86vh keeps the backdrop visible
+     on a 768-tall laptop. */
+  #ctlbtn{width:30px;padding:0;font-style:italic;font-weight:700;font-size:15px}
+  #ctlwrap{position:fixed;inset:0;z-index:60;display:none;place-items:center;
+        background:rgba(8,14,26,.72)}
+  #ctlwrap.on{display:grid}
+  #ctl{width:min(780px,94vw);max-height:86vh;display:flex;flex-direction:column;
+        background:var(--navy);border:1px solid rgba(255,255,255,.18);
+        border-radius:14px;padding:26px 28px 22px;box-shadow:0 26px 70px rgba(0,0,0,.6)}
+  #ctl h3{font-size:11px;letter-spacing:1.6px;color:rgba(255,255,255,.45);
+        text-transform:uppercase;margin:0 0 14px;flex:none}
+  /* min-height:0, or the scroller refuses to shrink past its content and the
+     whole panel grows past 86vh instead of scrolling inside it. */
+  #ctl .body{flex:1;min-height:0;overflow-y:auto;padding-right:10px;margin-right:-12px}
+  #ctl .foot{flex:none;border-top:1px solid rgba(255,255,255,.12);
+        margin-top:14px;padding-top:13px;font-size:13px;color:rgba(255,255,255,.55)}
+  /* The same object as the rail captions, so the modal maps onto the buttons.
+     Sticky is free: the scroller's ground is a solid var(--navy). */
+  #ctl .cap{position:sticky;top:0;z-index:1;background:var(--navy);
+        font-size:9px;letter-spacing:1.2px;color:rgba(255,255,255,.34);
+        text-transform:uppercase;padding:14px 0 6px;margin:0;
+        box-shadow:0 6px 8px -6px rgba(8,14,26,.9)}
+  #ctl .cap:first-child{padding-top:0}
+  #ctl .r{display:grid;grid-template-columns:26px 186px 1fr;align-items:center;
+        gap:12px;padding:6px 0;font-size:13.5px;line-height:1.35;
+        color:rgba(255,255,255,.82)}
+  #ctl .r + .r{border-top:1px solid rgba(255,255,255,.055)}
+  #ctl .r .g{display:flex;align-items:center;justify-content:center}
+  #ctl .r .k{color:rgba(255,255,255,.72);font-size:12.5px}
+  #ctl .r em{font-style:normal;color:var(--cyan);opacity:.75;font-size:12px;
+        white-space:nowrap}
+  /* The footer hint bar is one line tall and every hint uses the global kbd
+     rule, so the chip upgrade is scoped here rather than applied to kbd. */
+  #ctl kbd{display:inline-block;min-width:20px;text-align:center;padding:2px 7px;
+        font-size:12px;color:rgba(255,255,255,.9);
+        border:1px solid rgba(255,255,255,.16);box-shadow:0 1px 0 rgba(0,0,0,.35)}
+  @media (max-width:680px){ #ctl .r{grid-template-columns:24px 130px 1fr;gap:9px} }
+
+  /* Mouse glyphs: flat, like the compass needle. The only thing that changes
+     between rows is which region carries the cyan. */
+  .mg{width:24px;height:24px;flex:none;display:block}
+  .mg .bd{fill:none;stroke:rgba(255,255,255,.5);stroke-width:1.3;
+        stroke-linecap:round;stroke-linejoin:round}
+  .mg .hl{fill:var(--cyan);opacity:.9}
+  .mg .ar{fill:var(--cyan);stroke:var(--cyan);stroke-width:1.2;
+        stroke-linecap:round;stroke-linejoin:round}
 </style>
 </head>
 <body>
@@ -342,6 +391,11 @@
       <button id="undoBtn" title="დაბრუნება (Ctrl+Z)" aria-label="დაბრუნება">⟲</button>
       <button id="redoBtn" title="გამეორება (Ctrl+Y)" aria-label="გამეორება">⟳</button>
     </div>
+    <!-- Beside the history pair, so the two icon-only controls read as one glyph
+         group and the text buttons stay contiguous. #filemenu keeps the right
+         edge, so #filepop{right:0} still opens flush with the padding. -->
+    <button class="ghost" id="ctlbtn" title="მართვა: ღილაკები და კლავიატურა (F1)"
+            aria-label="მართვა">i</button>
     <div id="filemenu">
       <button class="ghost" id="filebtn" title="ფაილის მოქმედებები">ფაილი ▾</button>
       <div id="filepop">
@@ -377,6 +431,8 @@
       <button class="tool" data-tool="mass"><span class="ic">▭</span>მოცულობა</button>
       <div class="railcap">ფიგურა</div>
       <div id="cityprims"></div>
+      <div class="railcap">რეჟიმი</div>
+      <div class="subgrid" id="citysub"></div>
       <div class="railcap">ხაზი</div>
       <button class="tool" data-tool="path"><span class="ic">〜</span>ბილიკი</button>
       <div class="railcap">ტერიტორია</div>
@@ -442,16 +498,31 @@
 
   <div id="updwrap"><div id="upd">
     <h3>ᲒᲐᲜᲐᲮᲚᲔᲑᲐ</h3>
-    <p>ეს გვერდი ბრაუზერშია და ბრძანებას თვითონ ვერ გაუშვებს. განახლება ერთი
-       ორმაგი დაწკაპუნებაა: პროგრამის საქაღალდეში დევს ფაილი
-       <b>განახლება.cmd</b>.</p>
+    <p>დააჭირე ღილაკს. ბრაუზერი ნებართვას გკითხავს, მერე კონსოლი ახალ ვერსიას
+       ჩამოტვირთავს. მერე ეს გვერდი დახურე და ისევ გახსენი.</p>
+    <button class="mini" id="updgo" style="width:100%;padding:10px 0;margin:2px 0 14px">გაუშვი განახლება</button>
+    <p class="small">თუ არაფერი მოხდა, ეს ლეპტოპი ჯერ მომზადებული არაა: ერთხელ
+       გაუშვი <b>setup.cmd</b>. მანამდე კი დახურე გვერდი და ორმაგად დააწკაპუნე
+       სამუშაო მაგიდაზე <b>განახლება</b>-ს, ან ამ ფაილს:</p>
     <div class="path"><code id="updpath">—</code>
       <button class="mini" id="updcopy" style="flex:none;padding:8px 14px">კოპირება</button></div>
-    <p class="small">ის ჩამოტვირთავს ახალ ვერსიას და თავიდან ააწყობს ამ ფაილს.
-       მერე გვერდი დახურე და ისევ გახსენი. შენახული ნამუშევარი ადგილზე რჩება.</p>
+    <p class="small">შენახული ნამუშევარი ადგილზე რჩება.</p>
     <div class="stamp" id="updstamp"></div>
     <button class="mini" id="updclose" style="width:100%;margin-top:16px">დახურვა</button>
   </div></div>
+
+  <div id="ctlwrap"><div id="ctl">
+    <h3>ᲛᲐᲠᲗᲕᲐ</h3>
+    <div class="body" id="ctlbody"></div>
+    <p class="foot">დანარჩენს ქვედა ზოლი გეუბნება, როცა ხელსაწყოს აირჩევ.</p>
+    <button class="mini" id="ctlclose" style="width:100%;margin-top:12px;flex:none">დახურვა</button>
+  </div></div>
+
+  <!-- The mouse body once, not 35 times: build.sh inlines this file whole. -->
+  <svg style="display:none" aria-hidden="true"><symbol id="ms" viewBox="0 0 24 24">
+    <path class="bd" d="M12 3a5.5 5.5 0 0 1 5.5 5.5v7a5.5 5.5 0 0 1-11 0v-7A5.5 5.5 0 0 1 12 3Z"/>
+    <path class="bd" d="M6.5 10.5h11M12 3v7.5"/>
+  </symbol></svg>
 
   <footer>
     <span id="hint"></span>
@@ -481,16 +552,32 @@
 // is what makes it binding. Full list: tas.ge functional zones document.
 //
 // Roads are NOT a zone here: they are drawn with the ბილიკი path tool.
+//
+// The last entry is the exception and it carries no code on purpose: სხვა is
+// the catch-all for whatever the eight statutory categories do not cover, and
+// giving it a code would say the opposite of what the block teaches — that the
+// code is the part that binds. zoneLabel() below drops the dash for it.
 var ZONES = [
   { id: "res1",  ka: "საცხოვრებელი დაბალი",    code: "სზ-1/2",  color: "#F2D98D" },
   { id: "res2",  ka: "საცხოვრებელი საშუალო",   code: "სზ-3/5",  color: "#E8B54F" },
   { id: "res3",  ka: "საცხოვრებელი მაღალი",    code: "სზ-6",    color: "#D98E3B" },
   { id: "pub",   ka: "მაღაზია, ოფისი, სასტუმრო", code: "სსზ",   color: "#D2564B" },
   { id: "spec",  ka: "სკოლა, საავადმყოფო",     code: "სპეცზ-1", color: "#7E6BC4" },
-  { id: "ind",   ka: "საწარმო",                code: "ს-1/2",   color: "#8A8FA3" },
+  { id: "ind",   ka: "სხვა",                   code: "",        color: "#8A8FA3" },
   { id: "green", ka: "მწვანე და დასვენება",    code: "რზ",      color: "#6FAF63" },
   { id: "sanit", ka: "სანიტარიული ზოლი",       code: "სანზ",    color: "#A9C48E" }
 ];
+// Name for a dropdown row, and the code tag for the legend. A zone without a
+// code must not render a dangling dash or an empty italic tag.
+function zoneLabel(z) { return z.code ? z.ka + " — " + z.code : z.ka; }
+function zoneCodeTag(z) { return z.code ? ' <i>' + z.code + '</i>' : ""; }
+// The three property panels all offered the same list three different times.
+function zoneOptions(sel) {
+  return ZONES.map(function (z) {
+    return '<option value="' + z.id + '"' + (z.id === sel ? " selected" : "") + '>' +
+           zoneLabel(z) + '</option>';
+  }).join("");
+}
 var PATH = { ka: "ბილიკი", color: "#2E3E57" };
 var TOWNS = {
   akhmeta:  { ka: "ახმეტა" },
@@ -680,6 +767,11 @@ var state = {
   // duplicates asks citySelIds() instead, so the single-selection paths did not
   // have to be rewritten to gain a group.
   selMore: [],
+  // The same four editing levels the modelling tabs have. A ფიგურა drawn on the
+  // map is the same mesh a studio shape is — V and F, built by schBuildGeometry —
+  // so there was never a reason the map could only push it around whole.
+  sub: "object",    // object | face | edge | vertex
+  subSel: null,     // {type, index} within the selected shape
   nextId: 1,
   massWhite: false, // masses in white instead of the zone colour
   selPt: null,      // index of the selected corner of the selected zoning area
@@ -894,7 +986,7 @@ var SITERING = null;
 // Which commit this bundle was built from. A pure function of HEAD, never the
 // clock, so rebuilding without a new commit still reproduces the file byte for
 // byte. Null when built outside a checkout.
-var BUILD = {"c":"7e7b881","d":"2026-09-05"};
+var BUILD = {"c":"873ebe8","d":"2026-09-05"};
 
 // Working areas that SHIP with the tool, one ring per town, from data/sites.json.
 // A trainer draws the district once with the ტერიტორია tool, the ring is baked
@@ -1049,7 +1141,7 @@ function finishSite() {
     save();
   }
   draftPts = [];
-  if (draftLine) { scene.remove(draftLine); draftLine.geometry.dispose(); draftLine = null; }
+  clearDraft();
 }
 function clearSite() {
   delete state.sites[state.town];
@@ -1093,7 +1185,8 @@ var siteMat = new THREE.MeshBasicMaterial({ color: 0xE03A2F, transparent: true, 
                                             side: THREE.DoubleSide, depthTest: false });
 
 // ring: [[x,z], ...] closed implicitly. Returns the ribbon geometry.
-function ribbonOnTerrain(ring, W) {
+function ribbonOnTerrain(ring, W, hf) {
+  hf = hf || terrainAt;
   var pos = [];
   for (var e = 0; e < ring.length; e++) {
     var a = ring[e], b = ring[(e + 1) % ring.length];
@@ -1105,7 +1198,7 @@ function ribbonOnTerrain(ring, W) {
       var x1 = a[0] + (b[0] - a[0]) * t1, z1 = a[1] + (b[1] - a[1]) * t1;
       var dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz) || 1;
       var ox = -dz / L * W / 2, oz = dx / L * W / 2;
-      var y0 = terrainAt(x0, z0) + 1.2, y1 = terrainAt(x1, z1) + 1.2;
+      var y0 = hf(x0, z0) + 1.2, y1 = hf(x1, z1) + 1.2;
       pos.push(x0 - ox, y0, z0 - oz,  x1 + ox, y1, z1 + oz,  x1 - ox, y1, z1 - oz);
       pos.push(x0 - ox, y0, z0 - oz,  x0 + ox, y0, z0 + oz,  x1 + ox, y1, z1 + oz);
     }
@@ -1118,7 +1211,8 @@ function ribbonOnTerrain(ring, W) {
 // A zoning area is flat in plan but the ground under it is not. Triangulate the
 // outline, split any triangle whose edge is longer than one heightfield cell,
 // then drop every vertex onto the terrain. Corners alone would bridge a valley.
-function drapedFill(pts, lift, maxEdge) {
+function drapedFill(pts, lift, maxEdge, hf) {
+  hf = hf || terrainAt;
   if (!pts || pts.length < 3) return null;
   var contour = pts.map(function (q) { return new THREE.Vector2(q[0], q[1]); });
   var tris;
@@ -1144,7 +1238,7 @@ function drapedFill(pts, lift, maxEdge) {
   tris.forEach(function (t) { emit(contour[t[0]], contour[t[1]], contour[t[2]], 0); });
 
   var pos = [];
-  out.forEach(function (v) { pos.push(v.x, terrainAt(v.x, v.y) + lift, v.y); });
+  out.forEach(function (v) { pos.push(v.x, hf(v.x, v.y) + lift, v.y); });
   var g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   return g;
@@ -1290,7 +1384,8 @@ function buildContext(list, h) {
 // ---------------------------------------------------------------- ribbons
 // Shared by the real paved streets and by the paths students draw. Long spans
 // are split so the surface follows the hillside instead of cutting through it.
-function ribbonInto(pos, nor, pts, width, lift, step) {
+function ribbonInto(pos, nor, pts, width, lift, step, hf) {
+  hf = hf || terrainAt;
   var dense = [];
   for (var i = 0; i < pts.length - 1; i++) {
     var ax = pts[i][0], az = pts[i][1], bx = pts[i + 1][0], bz = pts[i + 1][1];
@@ -1313,10 +1408,10 @@ function ribbonInto(pos, nor, pts, width, lift, step) {
     // Each corner takes the ground under itself. Using the centreline height for
     // the full width, as this did, tips a 15 m road into the hill it crosses:
     // the uphill edge ends up under the terrain and the downhill edge in the air.
-    var p1 = [a[0] + nx, terrainAt(a[0] + nx, a[1] + nz) + lift, a[1] + nz];
-    var p2 = [b[0] + nx, terrainAt(b[0] + nx, b[1] + nz) + lift, b[1] + nz];
-    var p3 = [b[0] - nx, terrainAt(b[0] - nx, b[1] - nz) + lift, b[1] - nz];
-    var p4 = [a[0] - nx, terrainAt(a[0] - nx, a[1] - nz) + lift, a[1] - nz];
+    var p1 = [a[0] + nx, hf(a[0] + nx, a[1] + nz) + lift, a[1] + nz];
+    var p2 = [b[0] + nx, hf(b[0] + nx, b[1] + nz) + lift, b[1] + nz];
+    var p3 = [b[0] - nx, hf(b[0] - nx, b[1] - nz) + lift, b[1] - nz];
+    var p4 = [a[0] - nx, hf(a[0] - nx, a[1] - nz) + lift, a[1] - nz];
     pos.push(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2]);
     pos.push(p1[0], p1[1], p1[2], p3[0], p3[1], p3[2], p4[0], p4[1], p4[2]);
     for (var k = 0; k < 6; k++) nor.push(0, 1, 0);
@@ -1414,7 +1509,7 @@ function makeZoneMesh(it) {
   var col = new THREE.Color(state.massWhite ? 0xEDEDED : zoneOf(it.type).color);
   var g = new THREE.BoxGeometry(it.w, it.h, it.d);
   var m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: col }));
-  m.position.set(it.x, terrainAt(it.x, it.z) + it.h / 2, it.z);
+  m.position.set(it.x, terrainAt(it.x, it.z) + it.h / 2 + liftOf(it), it.z);
   m.rotation.y = it.rot || 0;          // buildings face streets, not the grid
   m.castShadow = true;
   m.receiveShadow = true;
@@ -1464,7 +1559,7 @@ function makeShapeMesh(it) {
   var col = new THREE.Color(state.massWhite ? 0xEDEDED : zoneOf(it.type).color);
   var g = schBuildGeometry(it);
   var m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: col }));
-  m.position.set(it.pos[0], terrainAt(it.pos[0], it.pos[2]) + (it.lift || 0), it.pos[2]);
+  m.position.set(it.pos[0], terrainAt(it.pos[0], it.pos[2]) + liftOf(it), it.pos[2]);
   m.rotation.y = it.rot || 0;
   m.castShadow = true;
   m.receiveShadow = true;
@@ -1499,6 +1594,7 @@ function rebuild() {
     if (m) objRoot.add(m);
   });
   buildHandles();
+  cityRefreshSubHelpers();     // the meshes are new, so the wireframe on them is stale
   renderLegend();
   renderProps();
 }
@@ -1562,9 +1658,15 @@ function groundPoint(ev) {
   return ray.ray.intersectPlane(planeY, p) ? p : null;
 }
 function pickObject(ev) {
+  var h = pickObjectHit(ev);
+  return h ? h.object : null;
+}
+// The whole intersection, not just the mesh: sub-object picking needs the face
+// index and the exact point, and both are thrown away by pickObject.
+function pickObjectHit(ev) {
   ray.setFromCamera(pointer(ev), camera);
   var hits = ray.intersectObjects(objRoot.children, false);
-  return hits.length ? hits[0].object : null;
+  return hits.length ? hits[0] : null;
 }
 
 // ---------------------------------------------------------------- interaction
@@ -1682,6 +1784,21 @@ renderer.domElement.addEventListener("pointerdown", function (ev) {
     return;
   }
 
+  // A sub-object level edits the mesh itself, so a click there means "grab this
+  // face, edge or vertex" and never "pick a different object to drag around".
+  if (state.sub !== "object") {
+    var subHit = pickObjectHit(ev);
+    var sd = subHit ? citySubPick(ev, subHit) : null;
+    if (sd) { drag = sd; return; }
+    // a miss, or something that is not an editable mesh: drop the sub-selection
+    // rather than leaving a highlight on a shape the student has walked away from
+    state.subSel = null;
+    if (!subHit) select(null);
+    cityRefreshSubHelpers(); renderProps();
+    drag = { mode: "orbit", x: ev.clientX, y: ev.clientY };
+    return;
+  }
+
   // select — clicking anything other than a corner disarms the corner, so
   // what Delete will remove always matches what the panel says
   var hit = pickObject(ev);
@@ -1719,7 +1836,12 @@ window.addEventListener("pointermove", function (ev) {
     if (lpc) { SC.tape.live = lpc; tapeRefresh(); }
     return;
   }
+  // An outline is placed one click at a time, so between clicks the only way to
+  // know where the next segment lands is to draw it. The band follows the
+  // cursor and dies with the drawing.
+  if (!drag && draftPts.length) { refreshDraft(groundPoint(ev)); return; }
   if (!drag) return;
+  if (drag.mode === "pushpull" || drag.mode === "subMove") { citySubMove(ev, drag); return; }
   if (drag.mode === "orbit") {
     var dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
     drag.x = ev.clientX; drag.y = ev.clientY;
@@ -1763,7 +1885,7 @@ window.addEventListener("pointermove", function (ev) {
       it.x = g.x - drag.ox;
       it.z = g.z - drag.oz;
       var mesh = meshFor(it.id);
-      if (mesh) mesh.position.set(it.x, terrainAt(it.x, it.z) + it.h / 2, it.z);
+      if (mesh) mesh.position.set(it.x, terrainAt(it.x, it.z) + it.h / 2 + liftOf(it), it.z);
     }
   }
 });
@@ -1796,6 +1918,9 @@ window.addEventListener("pointerup", function (ev) {
     }
   } else if (drag.mode === "move") {
     save();
+  } else if (drag.mode === "pushpull" || drag.mode === "subMove") {
+    // the mesh changed shape, so its footprint and floor area both moved
+    cityRefreshSubHelpers(); renderLegend(); renderProps(); save();
   } else if (drag.mode === "vtx") {
     // the corner moved, so this area's own m² and share both changed
     renderLegend(); renderProps(); save();
@@ -1816,6 +1941,10 @@ renderer.domElement.addEventListener("wheel", function (ev) {
 }, { passive: false });
 
 renderer.domElement.addEventListener("dblclick", function () {
+  if (!isCity()) {
+    if (SC.tool === "zone" || SC.tool === "path") schFinishFlat();
+    return;
+  }
   if (state.tool === "path") finishPath();
   if (state.tool === "site") finishSite();
   if (state.tool === "zone") finishArea();
@@ -1935,7 +2064,12 @@ function vgizBuild() {
     g.position.y = 0.52;
     return g;
   }
-  [AXES[0], AXES[1]].forEach(function (A) {      // x and y; z is the ground normal
+  // All three now. X and Y slide the object over the ground and it stays dropped
+  // on the terrain; Z is the ground normal and lifts it off, which is the only
+  // way to model a bridge, a canopy or anything standing over a slope. The two
+  // horizontal arrows keep the snap-to-surface, so the pair reads as one rule:
+  // move it flat and it lands; grab the blue arrow and it flies.
+  AXES.forEach(function (A) {
     var g = new THREE.Group();
     var shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.78, 8), gizMat(A.col));
     shaft.position.y = 0.39;
@@ -1994,11 +2128,11 @@ function vgizBuild() {
   VGIZ.parts.rotate.add(rg);
 
   var uni = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.24), gizMat(0xFFD24A));
-  uni.userData.axis = "xy"; uni.userData.kind = "scale"; uni.renderOrder = 1000;
+  uni.userData.axis = "xyz"; uni.userData.kind = "scale"; uni.renderOrder = 1000;
   VGIZ.parts.scale.add(uni);
   var uniGrab = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42),
     new THREE.MeshBasicMaterial({ visible: false }));
-  uniGrab.userData.axis = "xy"; uniGrab.userData.kind = "scale";
+  uniGrab.userData.axis = "xyz"; uniGrab.userData.kind = "scale";
   VGIZ.parts.scale.add(uniGrab);
 
   VGIZ.built = true;
@@ -2024,6 +2158,9 @@ function cityCentroid(it) {
 // whole selected object. A corner only ever moves, so the mode is forced there.
 function cgizTarget() {
   if (!isCity()) return null;
+  // In a sub-object level the drag is direct — grab the face and pull. Leaving
+  // the object gizmo up would put three arrows over the very faces being aimed at.
+  if (state.sub !== "object") return null;
   var pt = selPointArea();
   if (pt) return { it: pt, corner: state.selPt, mode: "move",
                    o: pt.pts[state.selPt], rot: 0 };
@@ -2033,9 +2170,30 @@ function cgizTarget() {
   var ids = citySelIds(), many = ids.length > 1;
   var c = many ? citySelPivot() : cityCentroid(it);
   return { it: it, corner: null, mode: state.cgiz, o: [c.x, c.z], many: many, ids: ids,
+           // The handles have to sit on the object, not on the ground under it,
+           // or a lifted mass is dragged by a gizmo floating below it.
+           lift: many ? 0 : liftOf(it),
            // A set has no single angle to align the size arrows to, so they stay
            // on the world axes; one object still gets arrows along its own sides.
            rot: (!many && it.kind === "zone") ? (it.rot || 0) : 0 };
+}
+
+// How far above the ground this object sits. Masses and primitives are dropped
+// onto the terrain, which is what you want while a plan is being laid out — but
+// a bridge, a canopy or an upper storey has to leave it, so the vertical arrow
+// writes a lift here and every mesh position reads it back. Areas and paths are
+// painted on the ground itself and have nowhere to go.
+function canLift(it) { return it && (it.kind === "zone" || it.kind === "shape"); }
+function liftOf(it) { return canLift(it) ? (it.lift || 0) : 0; }
+
+// Nothing may sink through the terrain: a mass at -3 m is a modelling accident
+// every time, and there is no undo gesture on a drag in progress.
+function cityLift(it, dy) {
+  if (!canLift(it)) return;
+  it.lift = Math.max(0, (it.lift || 0) + dy);
+}
+function cityGroupLift(ids, dy) {
+  ids.forEach(function (id) { cityLift(findItem(id), dy); });
 }
 
 // Moving a corner is the one case that touches a single point. Everything else
@@ -2067,21 +2225,27 @@ function cityRotate(it, a) {
   }
 }
 
-// axisId null scales both ground axes at once.
+// axisId null scales all three axes at once. "z" is the vertical: the studio
+// has always been able to stretch a shape upwards and the map could not, which
+// made the height of a mass settable only in whole storeys.
 function cityScale(it, axisId, k) {
   var kx = (!axisId || axisId === "x") ? k : 1;
   var kz = (!axisId || axisId === "y") ? k : 1;
+  var ky = (!axisId || axisId === "z") ? k : 1;
   if (it.kind === "zone") {
     it.w = Math.max(2, it.w * kx);
     it.d = Math.max(2, it.d * kz);
+    // A mass keeps its base on the ground, so height is the only thing the
+    // vertical scale can mean here. One metre is the floor — a zero-height box
+    // is invisible and cannot be grabbed again.
+    it.h = Math.max(1, it.h * ky);
     return;
   }
   // A primitive has no width and depth to set — it has vertices, so they scale,
   // exactly the way the studio scales its own shapes.
   if (it.kind === "shape") {
     for (var vi = 0; vi < it.V.length; vi++) {
-      it.V[vi][0] *= kx; it.V[vi][2] *= kz;
-      if (!axisId) it.V[vi][1] *= k;      // uniform takes the height with it
+      it.V[vi][0] *= kx; it.V[vi][1] *= ky; it.V[vi][2] *= kz;
     }
     return;
   }
@@ -2102,7 +2266,7 @@ function cityRegeom(it) {
     if (!m) return;
     m.geometry.dispose();
     m.geometry = schBuildGeometry(it);
-    m.position.set(it.pos[0], terrainAt(it.pos[0], it.pos[2]) + (it.lift || 0), it.pos[2]);
+    m.position.set(it.pos[0], terrainAt(it.pos[0], it.pos[2]) + liftOf(it), it.pos[2]);
     m.rotation.y = it.rot || 0;
     if (m.children[0]) {
       m.children[0].geometry.dispose();
@@ -2121,7 +2285,7 @@ function cityRegeom(it) {
   if (!m) return;
   m.geometry.dispose();
   m.geometry = new THREE.BoxGeometry(it.w, it.h, it.d);
-  m.position.set(it.x, terrainAt(it.x, it.z) + it.h / 2, it.z);
+  m.position.set(it.x, terrainAt(it.x, it.z) + it.h / 2 + liftOf(it), it.z);
   m.rotation.y = it.rot || 0;
   if (m.children[0]) {
     m.children[0].geometry.dispose();
@@ -2184,7 +2348,7 @@ function updateVGizmo() {
   var t = cgizTarget();
   if (!t) { VGIZ.root.visible = false; return; }
   vgizBuild();
-  var o = new THREE.Vector3(t.o[0], terrainAt(t.o[0], t.o[1]) + 2, t.o[1]);
+  var o = new THREE.Vector3(t.o[0], terrainAt(t.o[0], t.o[1]) + 2 + (t.lift || 0), t.o[1]);
   VGIZ.root.visible = true;
   VGIZ.root.position.copy(o);
   VGIZ.root.rotation.y = t.rot;        // so the size arrows follow a turned mass
@@ -2216,7 +2380,12 @@ function vgizStart(ev, hitObj) {
   if (!t) return false;
   // A corner has no size and no facing, so only the two move handles act on it.
   if (t.corner != null && hit.kind !== "move" && hit.kind !== "moveplane") return false;
-  var origin = new THREE.Vector3(t.o[0], terrainAt(t.o[0], t.o[1]) + 2, t.o[1]);
+  // ...and a corner of an outline painted on the ground cannot leave it, so the
+  // vertical arrow is refused there rather than silently doing nothing.
+  if (t.corner != null && hit.axis === "z") return false;
+  // Nor can an area or a path be lifted: they are draped over the terrain.
+  if (hit.axis === "z" && !t.many && !canLift(t.it)) return false;
+  var origin = new THREE.Vector3(t.o[0], terrainAt(t.o[0], t.o[1]) + 2 + (t.lift || 0), t.o[1]);
   var YUP = new THREE.Vector3(0, 1, 0);
   var d = { kind: hit.kind, id: t.it.id, corner: t.corner, origin: origin,
             // A corner drag is always about one point, whatever else is selected.
@@ -2230,7 +2399,7 @@ function vgizStart(ev, hitObj) {
     if (d.a0 === null) return false;
     d.total = 0; d.applied = 0;
 
-  } else if (hit.kind === "scale" && hit.axis === "xy") {
+  } else if (hit.kind === "scale" && hit.axis === "xyz") {
     d.kind = "scaleuni";
     d.screenY0 = ev.clientY;
     d.appliedK = 1;
@@ -2241,10 +2410,14 @@ function vgizStart(ev, hitObj) {
     if (!pp) return false;
     d.p0 = pp; d.appliedX = 0; d.appliedZ = 0;
 
-  } else {                                       // one ground axis: move or scale
+  } else {                                       // one axis: move or scale
     d.axisId = hit.axis;
-    // the gizmo is turned with the mass, so the handle's world direction is too
-    d.axis = axisById(hit.axis).v.clone().applyAxisAngle(YUP, t.rot);
+    d.vertical = hit.axis === "z";
+    // the gizmo is turned with the mass, so the handle's world direction is too.
+    // The vertical is the axis it turns about, so rotating it is a no-op — but
+    // applying the rotation to it anyway would drift it off vertical.
+    d.axis = d.vertical ? YUP.clone()
+                        : axisById(hit.axis).v.clone().applyAxisAngle(YUP, t.rot);
     d.t0 = schAxisPoint(ev, origin, d.axis);
     d.applied = 0; d.appliedK = 1;
   }
@@ -2265,12 +2438,23 @@ function vgizMove(ev) {
     if (S.on) { var c0 = d.origin.dot(d.axis); want = snapTo(c0 + raw, S.move) - c0; }
     var step = want - d.applied;
     if (step) {
-      if (d.many) cityGroupMove(d.ids, d.axis.x * step, d.axis.z * step);
-      else cityTranslate(it, d.corner, d.axis.x * step, d.axis.z * step);
-      d.applied = want;
+      // The vertical arrow writes the lift; the ground arrows write x and z and
+      // the mesh keeps landing on the terrain as it goes.
+      if (d.vertical) {
+        if (d.many) cityGroupLift(d.ids, step);
+        else cityLift(it, step);
+        // clamped at the ground, so the readout has to report where it landed
+        d.applied += step;
+      } else {
+        if (d.many) cityGroupMove(d.ids, d.axis.x * step, d.axis.z * step);
+        else cityTranslate(it, d.corner, d.axis.x * step, d.axis.z * step);
+        d.applied = want;
+      }
     }
     out = (d.axisId || "").toUpperCase() + "  " +
-          (want >= 0 ? "+" : "") + want.toFixed(1) + " მ";
+          (d.vertical
+            ? "სიმაღლე " + liftOf(it).toFixed(1) + " მ"
+            : (want >= 0 ? "+" : "") + want.toFixed(1) + " მ");
 
   } else if (d.kind === "moveplane") {
     var p = planePoint(ev, d.origin, d.axis);
@@ -2360,26 +2544,78 @@ function meshFor(id) {
 }
 
 // ---------------------------------------------------------------- path drawing
-var draftPts = [], draftLine = null;
+var draftPts = [], draftLine = null, draftDots = null, draftGhost = null;
+
+// The line being drawn is the one thing on screen that has to be impossible to
+// miss, and it used to be the easiest: it appeared only after the second click,
+// it was drawn in the zone's own pale fill for ზონის კონტური, and it obeyed the
+// depth buffer, so a 1.5 m offset put it inside the first hillock it crossed.
+// Now: one loud red for every drawing tool, drawn over everything, a dot on
+// every point placed, and a rubber band to the cursor so the next segment is
+// visible before it is committed.
+var DRAFT_RED = 0xFF2A1E;
+var DRAFT_LIFT = 3;                                  // metres above the ground
+
+function draftMat() {
+  return new THREE.LineBasicMaterial({ color: DRAFT_RED, depthTest: false, transparent: true });
+}
+function draftV(q) { return [q[0], terrainAt(q[0], q[1]) + DRAFT_LIFT, q[1]]; }
+
+function clearDraft() {
+  [draftLine, draftDots, draftGhost].forEach(function (o) {
+    if (!o) return;
+    scene.remove(o);
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) o.material.dispose();
+  });
+  draftLine = draftDots = draftGhost = null;
+}
+
+// cursor is the live ground point under the pointer, or null when there is none
+// (a click just landed, or the pointer is off the terrain).
+function refreshDraft(cursor) {
+  clearDraft();
+  if (!draftPts.length) return;
+
+  var v = [];
+  draftPts.forEach(function (q) { v.push.apply(v, draftV(q)); });
+  // working areas and zones are closed shapes: show them closing as drawn
+  if (isClosingTool() && draftPts.length > 2) v.push.apply(v, draftV(draftPts[0]));
+  if (v.length >= 6) {
+    var g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+    draftLine = new THREE.Line(g, draftMat());
+    draftLine.renderOrder = 1002;
+    scene.add(draftLine);
+  }
+
+  var dv = [];
+  draftPts.forEach(function (q) { dv.push.apply(dv, draftV(q)); });
+  var dg = new THREE.BufferGeometry();
+  dg.setAttribute("position", new THREE.Float32BufferAttribute(dv, 3));
+  draftDots = new THREE.Points(dg, new THREE.PointsMaterial({
+    color: 0xFFFFFF, size: 9, sizeAttenuation: false, depthTest: false, transparent: true }));
+  draftDots.renderOrder = 1004;
+  scene.add(draftDots);
+
+  // The rubber band: last point to the cursor, plus the closing leg back to the
+  // start while an outline is open, so the shape it would become is visible.
+  if (cursor) {
+    var last = draftPts[draftPts.length - 1];
+    var gv = draftV(last).concat([cursor.x, terrainAt(cursor.x, cursor.z) + DRAFT_LIFT, cursor.z]);
+    if (isClosingTool() && draftPts.length > 1) gv = gv.concat(draftV(draftPts[0]));
+    var gg = new THREE.BufferGeometry();
+    gg.setAttribute("position", new THREE.Float32BufferAttribute(gv, 3));
+    draftGhost = new THREE.Line(gg, new THREE.LineBasicMaterial({
+      color: DRAFT_RED, depthTest: false, transparent: true, opacity: 0.55 }));
+    draftGhost.renderOrder = 1001;
+    scene.add(draftGhost);
+  }
+}
 
 function addPathPoint(p) {
   draftPts.push([p.x, p.z]);
-  if (draftLine) { scene.remove(draftLine); draftLine.geometry.dispose(); }
-  if (draftPts.length > 1) {
-    var g = new THREE.BufferGeometry();
-    var v = [];
-    draftPts.forEach(function (q) { v.push(q[0], terrainAt(q[0], q[1]) + 1.5, q[1]); });
-    // working areas and zones are closed shapes: show them closing as drawn
-    if (isClosingTool() && draftPts.length > 2) {
-      v.push(draftPts[0][0], terrainAt(draftPts[0][0], draftPts[0][1]) + 1.5, draftPts[0][1]);
-    }
-    g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
-    draftLine = new THREE.Line(g, new THREE.LineBasicMaterial({
-      color: state.tool === "site" ? 0xE03A2F
-           : state.tool === "zone" ? new THREE.Color(ZONES[0].color)
-           : 0xffffff }));
-    scene.add(draftLine);
-  }
+  refreshDraft(null);
   // running area, so nobody has to guess whether a zone is the right size
   if (isClosingTool()) {
     var a = ringArea(draftPts);
@@ -2411,7 +2647,7 @@ function finishArea() {
       "ახლა აირჩიე პანელში, <b>რომელი ზონაა</b> ეს კონტური.";
   }
   draftPts = [];
-  if (draftLine) { scene.remove(draftLine); draftLine.geometry.dispose(); draftLine = null; }
+  clearDraft();
 }
 function finishPath() {
   if (draftPts.length > 1) {
@@ -2420,7 +2656,7 @@ function finishPath() {
     save();
   }
   draftPts = [];
-  if (draftLine) { scene.remove(draftLine); draftLine.geometry.dispose(); draftLine = null; }
+  clearDraft();
 }
 
 // ---------------------------------------------------------------- selection + props
@@ -2455,11 +2691,12 @@ function pathLength(it) {
 // and nothing else", so clearing selMore here is what keeps a stale group from
 // surviving a tab switch, a delete or a fresh draw.
 function select(id) {
-  if (id !== state.selected) state.selPt = null;
+  if (id !== state.selected) { state.selPt = null; state.subSel = null; }
   state.selected = id;
   state.selMore = [];
   markSelected();
   buildHandles();
+  cityRefreshSubHelpers();     // the wireframe belongs to whatever is selected now
   renderProps();
 }
 
@@ -2914,10 +3151,12 @@ function ptsSpan(pts) {
 function degOf(rad) { return ((((rad || 0) * 180 / Math.PI) % 360) + 360) % 360; }
 
 // ---- the city descriptor ------------------------------------------------
-// Vertical position is not offered here and the note says why: every object in
-// ქალაქი is draped on the terrain, so its height is the ground's to give. For
-// the same reason nothing pitches or rolls, and only the vertical ring of
-// ბრუნვა is live — which is exactly what the city gizmo shows.
+// Z is how far the object stands above the ground under it — zero for anything
+// dropped on the terrain, which is still what happens when it is slid sideways.
+// An outline or a path is painted on the ground itself and has no Z to give, so
+// there the field falls back to reporting the ground level and stays read-only.
+// Nothing pitches or rolls either way, so only the vertical ring of ბრუნვა is
+// live — which is exactly what the city gizmo shows.
 function cityXform(it) {
   var c = cityCentroid(it), size, sizeOn;
   if (it.kind === "zone") {
@@ -2925,20 +3164,23 @@ function cityXform(it) {
   } else if (it.kind === "shape") {
     var b = bboxOf(it.V);
     size = [b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], b.hi[1] - b.lo[1]];
-    sizeOn = [1, 1, 0];                        // height rides on the vertices
+    sizeOn = [1, 1, 1];
   } else {
     var e = ptsSpan(it.pts);
     size = [e[0], e[1], it.kind === "path" ? it.width : 0];
     sizeOn = [1, 1, it.kind === "path" ? 1 : 0];
   }
+  var lift = canLift(it);
   return {
-    pos:  [c.x, -c.z, terrainAt(c.x, c.z)], posOn:  [1, 1, 0],
+    pos:  [c.x, -c.z, lift ? liftOf(it) : terrainAt(c.x, c.z)],
+    posOn:  [1, 1, lift ? 1 : 0],
     rot:  [0, 0, degOf(it.rot)],             rotOn:  [0, 0, 1],
     size: size,                              sizeOn: sizeOn,
-    posTip:  "სიმაღლეს რელიეფი განსაზღვრავს",
+    posTip:  lift ? "" : "კონტური და ბილიკი რელიეფზეა დაფენილი",
     rotTip:  "ქალაქში ყველაფერი რელიეფზეა დაფენილი — მხოლოდ ვერტიკალური ღერძი ბრუნავს",
-    sizeTip: it.kind === "shape" ? "სიმაღლე გიზმოთი იცვლება" : "",
-    note: "Z — მიწის ნიშნული ამ წერტილში."
+    sizeTip: "",
+    note: lift ? "Z — სიმაღლე მიწიდან. ნული ნიშნავს, რომ მიწაზე დგას."
+               : "Z — მიწის ნიშნული ამ წერტილში."
   };
 }
 
@@ -2947,6 +3189,7 @@ function cityXformSet(it, key, ax, v) {
     var c = cityCentroid(it);
     if (ax === 0) cityTranslate(it, null, v - c.x, 0);
     else if (ax === 1) cityTranslate(it, null, 0, -v - c.z);
+    else if (canLift(it)) it.lift = Math.max(0, v);   // typed height above ground
     else return false;
     return true;
   }
@@ -2962,8 +3205,9 @@ function cityXformSet(it, key, ax, v) {
   }
   if (it.kind === "path" && ax === 2) { it.width = Math.max(3, Math.min(30, v)); return true; }
   var cur = cityXform(it).size[ax];
-  if (!(cur > 0) || ax === 2) return false;
-  cityScale(it, ax === 0 ? "x" : "y", v / cur);
+  if (!(cur > 0)) return false;
+  if (ax === 2 && it.kind !== "shape") return false;   // only a mesh has a height to set
+  cityScale(it, ax === 0 ? "x" : ax === 1 ? "y" : "z", v / cur);
   return true;
 }
 
@@ -3058,10 +3302,7 @@ function renderPropsBody() {
   if (it.kind === "area") {
     var sa = siteArea(state.town);
     var den = sa > 0 ? sa : townSize(state.town) * townSize(state.town);
-    var opts = ZONES.map(function (z) {
-      return '<option value="' + z.id + '"' + (z.id === it.type ? " selected" : "") + '>' +
-             z.ka + ' — ' + z.code + '</option>';
-    }).join("");
+    var opts = zoneOptions(it.type);
     box.innerHTML =
       '<div class="row"><label>ზონა</label>' +
       '<select id="az" style="flex:1;min-width:0">' + opts + '</select></div>' +
@@ -3088,10 +3329,7 @@ function renderPropsBody() {
     return;
   }
   if (it.kind === "shape") {
-    var zopts = ZONES.map(function (z) {
-      return '<option value="' + z.id + '"' + (z.id === it.type ? " selected" : "") + '>' +
-             z.ka + ' — ' + z.code + '</option>';
-    }).join("");
+    var zopts = zoneOptions(it.type);
     box.innerHTML =
       '<div class="row"><label>ფიგურა</label><span class="val auto">' +
       (primName(it.prim) || it.prim) + '</span></div>' +
@@ -3147,11 +3385,7 @@ function renderPropsBody() {
       '<div class="row"><label>კუთხე</label><span class="val auto">' +
       (((Math.round((it.rot || 0) * 180 / Math.PI) % 360) + 360) % 360) + '°</span></div>' +
       '<div class="row"><label>ზონა</label>' +
-      '<select id="mz" style="flex:1;min-width:0">' +
-      ZONES.map(function (z) {
-        return '<option value="' + z.id + '"' + (z.id === it.type ? " selected" : "") + '>' +
-               z.ka + ' — ' + z.code + '</option>';
-      }).join("") + '</select></div>' +
+      '<select id="mz" style="flex:1;min-width:0">' + zoneOptions(it.type) + '</select></div>' +
       DUPBTN +
       '<button class="danger" id="del">წაშლა</button>';
     document.getElementById("mz").onchange = function () {
@@ -3164,7 +3398,7 @@ function renderPropsBody() {
       if (m) {
         m.geometry.dispose();
         m.geometry = new THREE.BoxGeometry(it.w, it.h, it.d);
-        m.position.y = terrainAt(it.x, it.z) + it.h / 2;
+        m.position.y = terrainAt(it.x, it.z) + it.h / 2 + liftOf(it);
         if (m.children[0]) {
           m.children[0].geometry.dispose();
           m.children[0].geometry = new THREE.EdgesGeometry(m.geometry);
@@ -3293,7 +3527,7 @@ function renderLegend() {
       right += ' · <span style="opacity:.7">' +
                Math.round(massed[z.id]).toLocaleString() + ' მ² აშენებული</span>';
     html += '<div class="leg"><span class="sw" style="background:' + z.color + '"></span>' +
-            '<span class="nm">' + z.ka + ' <i>' + z.code + '</i></span>' +
+            '<span class="nm">' + z.ka + zoneCodeTag(z) + '</span>' +
             '<span class="ar">' + right + '</span></div>';
   });
   if (pathLen > 0) {
@@ -3426,9 +3660,10 @@ function histRestore(snap) {
   SC.activeDoc = isCity() ? "school"
                : (SC.docs[state.tab] ? state.tab : "school");
   var d = SC.docs[SC.activeDoc];
-  SC.data = d.data; SC.legend = d.legend; SC.planName = d.planName;
+  SC.data = d.data; SC.flat = d.flat || (d.flat = { A: [], B: [] });
+  SC.legend = d.legend; SC.planName = d.planName;
   SC.nextId = d.nextId; SC.variant = d.variant;
-  SC.sel = null; SC.subSel = null;
+  SC.sel = null; SC.subSel = null; SC.flatSel = null;
   state.data = o.ct.data; state.nextId = o.ct.nextId; state.variant = o.ct.variant;
   if (o.ct.sites) { state.sites = o.ct.sites; buildSite(state.town); refreshContext(); }
   state.selected = null;
@@ -3548,6 +3783,253 @@ function buildCityPrims() {
   });
 }
 
+// ---------------------------------------------------------------- city sub-object
+// The four editing levels, on the map. A ფიგურა in ქალაქი is the same mesh a
+// studio shape is, so the same push/pull works — but a city shape is placed
+// differently: it carries an angle applied to the mesh, and it sits on the
+// terrain plus whatever lift it has been given. So local vertices go through a
+// real transform here, where the studio could add its offset and be done.
+var citySub = { helpers: new THREE.Group() };
+scene.add(citySub.helpers);
+
+function buildCitySub() {
+  var host = document.getElementById("citysub");
+  if (!host || host.children.length) return;
+  SUBMODES.forEach(function (s) {
+    var b = document.createElement("button");
+    b.className = "tool sub" + (s.id === state.sub ? " on" : "");
+    b.dataset.csub = s.id;
+    b.textContent = s.ka;
+    host.appendChild(b);
+  });
+}
+
+function setCitySub(s) {
+  state.sub = s;
+  state.subSel = null;
+  document.querySelectorAll("#citysub .sub").forEach(function (b) {
+    b.classList.toggle("on", b.dataset.csub === s);
+  });
+  // A sub-object level is about one mesh, so a Ctrl+click set makes no sense in
+  // it, and neither does a corner armed on a zoning outline.
+  if (s !== "object") { state.selMore = []; state.selPt = null; }
+  cityRefreshSubHelpers();
+  buildHandles();
+  renderProps();
+  document.getElementById("hint").innerHTML =
+    s === "object" ? HINTS.select
+    : s === "face" ? "დააწკაპუნე წახნაგზე და გადაათრიე — ის ამოიწევა ან ჩაიწევა."
+    : s === "edge" ? "დააწკაპუნე წიბოზე და გადაათრიე. <kbd>Shift</kbd> — ვერტიკალურად."
+    : "დააწკაპუნე წვეროზე და გადაათრიე. <kbd>Shift</kbd> — ვერტიკალურად.";
+}
+
+// The selected shape, but only when the map is actually in a sub-object level.
+function citySubShape() {
+  if (state.sub === "object" || state.selected == null) return null;
+  var it = findItem(state.selected);
+  return (it && it.kind === "shape") ? it : null;
+}
+
+function cityShapeOrigin(it) {
+  return new THREE.Vector3(it.pos[0], terrainAt(it.pos[0], it.pos[2]) + liftOf(it), it.pos[2]);
+}
+// local vertex -> world, honouring the shape's own angle
+function cityL2W(it, v) {
+  var s = Math.sin(it.rot || 0), c = Math.cos(it.rot || 0);
+  var o = cityShapeOrigin(it);
+  return new THREE.Vector3(o.x + v[0] * c + v[2] * s, o.y + v[1], o.z - v[0] * s + v[2] * c);
+}
+// world -> local, the exact inverse
+function cityW2L(it, p) {
+  var s = Math.sin(it.rot || 0), c = Math.cos(it.rot || 0);
+  var o = cityShapeOrigin(it);
+  var dx = p.x - o.x, dy = p.y - o.y, dz = p.z - o.z;
+  return [dx * c - dz * s, dy, dx * s + dz * c];
+}
+// a local direction (a face normal) rotated into the world
+function cityDir2W(it, n) {
+  var s = Math.sin(it.rot || 0), c = Math.cos(it.rot || 0);
+  return new THREE.Vector3(n[0] * c + n[2] * s, n[1], -n[0] * s + n[2] * c);
+}
+
+function cityClearSubHelpers() {
+  for (var i = citySub.helpers.children.length - 1; i >= 0; i--) {
+    var h = citySub.helpers.children[i];
+    citySub.helpers.remove(h);
+    if (h.geometry) h.geometry.dispose();
+    if (h.material) h.material.dispose();
+  }
+}
+
+// Wireframe, dots and the highlighted element — the same three layers the studio
+// draws, in world space because a city shape is not sitting at its own origin.
+function cityRefreshSubHelpers() {
+  cityClearSubHelpers();
+  var sh = citySubShape();
+  if (!sh) return;
+  var edges = edgeList(sh.F), el = [];
+  for (var i = 0; i < edges.length; i++) {
+    var a = cityL2W(sh, sh.V[edges[i][0]]), b = cityL2W(sh, sh.V[edges[i][1]]);
+    el.push(a.x, a.y, a.z, b.x, b.y, b.z);
+  }
+  var eg = new THREE.BufferGeometry();
+  eg.setAttribute("position", new THREE.Float32BufferAttribute(el, 3));
+  var eline = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 0.85, depthTest: false }));
+  eline.renderOrder = 900;
+  citySub.helpers.add(eline);
+
+  if (state.sub === "vertex") {
+    var vl = [];
+    for (var i = 0; i < sh.V.length; i++) {
+      var w = cityL2W(sh, sh.V[i]); vl.push(w.x, w.y, w.z);
+    }
+    var vg = new THREE.BufferGeometry();
+    vg.setAttribute("position", new THREE.Float32BufferAttribute(vl, 3));
+    var pts = new THREE.Points(vg, new THREE.PointsMaterial({
+      color: 0x33BEC4, size: 8, sizeAttenuation: false, depthTest: false }));
+    pts.renderOrder = 901;
+    citySub.helpers.add(pts);
+  }
+
+  var sel = state.subSel;
+  if (!sel) return;
+  if (sel.type === "face" && sh.F[sel.index]) {
+    var f = sh.F[sel.index], fp = [];
+    for (var t = 1; t < f.length - 1; t++) {
+      [f[0], f[t], f[t + 1]].forEach(function (vi) {
+        var w = cityL2W(sh, sh.V[vi]); fp.push(w.x, w.y, w.z);
+      });
+    }
+    var fg = new THREE.BufferGeometry();
+    fg.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3));
+    var fm = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({
+      color: 0x33BEC4, transparent: true, opacity: 0.45,
+      side: THREE.DoubleSide, depthTest: false }));
+    fm.renderOrder = 902;
+    citySub.helpers.add(fm);
+  } else if (sel.type === "edge" && edges[sel.index]) {
+    var e = edges[sel.index];
+    var a = cityL2W(sh, sh.V[e[0]]), b = cityL2W(sh, sh.V[e[1]]);
+    var sg = new THREE.BufferGeometry();
+    sg.setAttribute("position", new THREE.Float32BufferAttribute(
+      [a.x, a.y, a.z, b.x, b.y, b.z], 3));
+    var sl = new THREE.LineSegments(sg, new THREE.LineBasicMaterial({
+      color: 0x33BEC4, depthTest: false }));
+    sl.renderOrder = 903;
+    citySub.helpers.add(sl);
+  } else if (sel.type === "vertex" && sh.V[sel.index]) {
+    var w = cityL2W(sh, sh.V[sel.index]);
+    var pg = new THREE.BufferGeometry();
+    pg.setAttribute("position", new THREE.Float32BufferAttribute([w.x, w.y, w.z], 3));
+    var pp = new THREE.Points(pg, new THREE.PointsMaterial({
+      color: 0xFFFFFF, size: 13, sizeAttenuation: false, depthTest: false }));
+    pp.renderOrder = 904;
+    citySub.helpers.add(pp);
+  }
+}
+
+// Which face/edge/vertex a click landed on, and the drag that follows from it.
+// Returns a drag descriptor or null when the click missed a shape.
+function citySubPick(ev, hit) {
+  var sh = findItem(hit.object.userData.id);
+  if (!sh) return null;
+  // Only a ფიგურა is a mesh. A მოცულობა is a box with a width, a depth and a
+  // storey count, and an outline is painted on the ground — clicking either at
+  // this level did nothing at all, which reads as a broken tool rather than as
+  // a thing that does not apply.
+  if (sh.kind !== "shape") {
+    select(sh.id);
+    document.getElementById("hint").innerHTML = sh.kind === "zone"
+      ? "მოცულობას წახნაგები არ აქვს. ზომა პანელშია, ან გადმოიტანე <b>ფიგურა</b> და ის დაამუშავე."
+      : "აქ მხოლოდ <b>ფიგურას</b> ამუშავებ წახნაგებით. კონტურის კუთხეები ობიექტის რეჟიმშია.";
+    return null;
+  }
+  if (state.selected !== sh.id) { select(sh.id); }
+  var geo = hit.object.geometry;
+  var t2f = geo.userData && geo.userData.tri2face;
+  if (state.sub === "face") {
+    if (!t2f) return null;
+    var fi = t2f[hit.faceIndex];
+    if (fi == null) return null;
+    state.subSel = { type: "face", index: fi };
+    cityRefreshSubHelpers(); renderProps();
+    var n = faceNormal(sh.V, sh.F[fi]);
+    var c = faceCentroid(sh.V, sh.F[fi]);
+    var origin = cityL2W(sh, c), dir = cityDir2W(sh, n);
+    // dir is where the drag is measured, in the world; nloc is the same
+    // direction in the shape's own frame, which is where the vertices live.
+    return { mode: "pushpull", id: sh.id, fi: fi, dir: dir, nloc: n, origin: origin,
+             t0: schAxisPoint(ev, origin, dir), applied: 0 };
+  }
+  var lp = cityW2L(sh, hit.point), best = -1, bd = 1e9, i;
+  if (state.sub === "vertex") {
+    for (i = 0; i < sh.V.length; i++) {
+      var v = sh.V[i];
+      var d = (v[0]-lp[0])*(v[0]-lp[0]) + (v[1]-lp[1])*(v[1]-lp[1]) + (v[2]-lp[2])*(v[2]-lp[2]);
+      if (d < bd) { bd = d; best = i; }
+    }
+    state.subSel = { type: "vertex", index: best };
+  } else {
+    var edges = edgeList(sh.F);
+    for (i = 0; i < edges.length; i++) {
+      var a = sh.V[edges[i][0]], b = sh.V[edges[i][1]];
+      var mx = (a[0]+b[0])/2, my = (a[1]+b[1])/2, mz = (a[2]+b[2])/2;
+      var d2 = (mx-lp[0])*(mx-lp[0]) + (my-lp[1])*(my-lp[1]) + (mz-lp[2])*(mz-lp[2]);
+      if (d2 < bd) { bd = d2; best = i; }
+    }
+    state.subSel = { type: "edge", index: best };
+  }
+  cityRefreshSubHelpers(); renderProps();
+  var verts = subVerts(sh, state.subSel);
+  return { mode: "subMove", id: sh.id, verts: verts, lastY: ev.clientY,
+           vertical: !!ev.shiftKey, last: hit.point.clone() };
+}
+
+// One pointermove of a sub-object drag.
+function citySubMove(ev, d) {
+  var sh = findItem(d.id);
+  if (!sh || sh.kind !== "shape") return;
+  if (d.mode === "pushpull") {
+    var want = schAxisPoint(ev, d.origin, d.dir) - d.t0;
+    if (state.snap.on) want = snapTo(want, state.snap.move);
+    var step = want - d.applied;
+    if (!step) return;
+    d.applied = want;
+    var f = sh.F[d.fi];
+    if (!f) return;
+    // Move the face's own vertices. Extruding on the spot would add geometry on
+    // every pointermove; the studio's Shift+drag extrude is a separate gesture.
+    var seen = {}, n = d.nloc;
+    for (var i = 0; i < f.length; i++) {
+      if (seen[f[i]]) continue;
+      seen[f[i]] = 1;
+      sh.V[f[i]][0] += n[0] * step;
+      sh.V[f[i]][1] += n[1] * step;
+      sh.V[f[i]][2] += n[2] * step;
+    }
+    document.getElementById("hint").textContent =
+      "წახნაგი  " + (want >= 0 ? "+" : "") + want.toFixed(1) + " მ";
+  } else {
+    var p = groundPoint(ev);
+    if (!p) return;
+    if (d.vertical || ev.shiftKey) {
+      var dy = (d.lastY - ev.clientY) * 0.25;      // screen pixels to metres
+      d.lastY = ev.clientY;
+      d.verts.forEach(function (vi) { sh.V[vi][1] += dy; });
+    } else {
+      var lp = cityW2L(sh, p), ll = cityW2L(sh, d.last);
+      var ddx = lp[0] - ll[0], ddz = lp[2] - ll[2];
+      d.verts.forEach(function (vi) { sh.V[vi][0] += ddx; sh.V[vi][2] += ddz; });
+      d.last = p.clone();
+    }
+    document.getElementById("hint").textContent =
+      (state.subSel && state.subSel.type === "edge" ? "წიბო" : "წვერო") + "  " + shapeSpan(sh);
+  }
+  cityRegeom(sh);
+  cityRefreshSubHelpers();
+}
+
 function setTool(t) {
   if (t === "masswhite") {                    // a toggle, not a mode
     state.massWhite = !state.massWhite;
@@ -3600,6 +4082,7 @@ document.getElementById("railCity").addEventListener("click", function (ev) {
   if (!b) return;                                    // city buttons only, not #railSchool
   if (b.dataset.cgiz) { setCityGiz(b.dataset.cgiz); return; }
   if (b.dataset.csnap) { toggleCitySnap(); return; }
+  if (b.dataset.csub) { setCitySub(b.dataset.csub); return; }
   if (b.dataset.tool) setTool(b.dataset.tool);
 });
 
@@ -3675,12 +4158,124 @@ function showUpdate() {
   var cmd = dir ? dir + "\\განახლება.cmd"
                 : "git pull  &&  bash build.sh";
   document.getElementById("updpath").textContent = cmd;
+  // A served copy has no folder to update and no scheme to call, so the button
+  // would be a dead end; the git line above is the answer there.
+  document.getElementById("updgo").style.display = dir ? "" : "none";
   document.getElementById("updstamp").innerHTML = BUILD
     ? "ახლა გიდევს <b>" + BUILD.c + "</b> · " + BUILD.d
     : "ეს ბილდი რეპოზიტორიის გარეთაა აწყობილი, ვერსიას ვერ გეტყვი.";
   document.getElementById("updwrap").classList.add("on");
 }
 document.getElementById("updbtn").addEventListener("click", showUpdate);
+
+// The page cannot start a process — no browser lets a file:// document do that,
+// and it is the reason the whole update is a separate .cmd. What it can do is
+// hand Windows a URL: if setup.cmd has registered bekura3d:// on this laptop,
+// the shell answers it by running update.cmd, and the button is a real button.
+// If it has not, nothing happens and the path below the button is still there.
+// The navigation has to be a top-level one inside the click gesture: Chrome and
+// Edge refuse an external-protocol launch from a frame or without a gesture.
+document.getElementById("updgo").addEventListener("click", function () {
+  location.href = "bekura3d://update";
+});
+
+// ---------------------------------------------------------------- controls
+// Every gesture the program answers, on one sheet. Not filtered by tab: a stuck
+// student cannot guess a category, and they compare screens with their neighbour,
+// so the sheet has to be the same one. Scope is marked per row instead, and only
+// where it differs from "everywhere" — most rows do not, and printing the common
+// case on all of them would be noise.
+//
+// Ordered by how often a fourteen-year-old needs the row, not by how the code is
+// laid out. ხედი comes first because the real trigger for opening this is a
+// student who has dragged the camera under the model and sees black.
+var MG = {                              // one <svg> per gesture, body from #ms
+  left:  '<path class="hl" d="M12 3A5.5 5.5 0 0 0 6.5 8.5V10.5H12Z"/><use href="#ms"/>',
+  right: '<path class="hl" d="M12 3a5.5 5.5 0 0 1 5.5 5.5v2H12Z"/><use href="#ms"/>',
+  middle:'<rect class="hl" x="10.65" y="4.7" width="2.7" height="4.6" rx="1.35"/><use href="#ms"/>',
+  wheel: '<rect class="hl" x="10.65" y="4.7" width="2.7" height="4.6" rx="1.35"/><use href="#ms"/>' +
+         '<path class="ar" d="M21 4.3l1.9 3.1h-3.8Z"/><path class="ar" d="M21 15.7l-1.9-3.1h3.8Z"/>',
+  drag:  '<use href="#ms"/><path class="ar" d="M19.7 12h2.6"/>' +
+         '<path class="ar" d="M18.4 12l2.4-1.7v3.4Z"/><path class="ar" d="M23.6 12l-2.4-1.7v3.4Z"/>',
+  key:   ""                             // the kbd chip beside it is the glyph
+};
+// [glyph, gesture, meaning, scope]  — scope "" means every tab
+var CTLROWS = [
+  ["ხედი", [
+    ["right",  "მარჯვენა ღილაკი + გადათრევა", "ატრიალებ ხედს მოდელის გარშემო. გეგმის ხედში გადააადგილებ.", ""],
+    ["wheel",  "ბორბალი", "აახლოებ და აშორებ.", ""],
+    ["middle", "შუა ღილაკი + გადათრევა", "გადააადგილებ ხედს გვერდულად, კუთხის შეცვლის გარეშე.", ""],
+    ["drag",   "<kbd>Shift</kbd> + მარცხენა ღილაკი", "იგივე გვერდული გადაადგილება, თუ შუა ღილაკი არ გაქვს.", ""],
+    ["drag",   "მარცხენა ღილაკი ცარიელზე", "ატრიალებ ხედს რუკის გარშემო.", "ქალაქი"],
+    ["left",   "⌖ ხედი — მარჯვნივ", "აბრუნებს კამერას საწყის ადგილას. თუ დაიკარგე, აქ დააჭირე.", ""],
+    ["left",   "ViewCube-ის წახნაგი", "ხედს აყენებს ზუსტად იმ მხრიდან: ზემოდან, გვერდიდან, წინიდან.", "მოდელირება"]
+  ]],
+  ["მონიშვნა", [
+    ["left", "მარცხენა ღილაკი ობიექტზე", "მონიშნავს ერთს და აჩენს მის სახელურებს.", ""],
+    ["left", "მარცხენა ღილაკი ცარიელ მიწაზე", "ხსნის მონიშვნას.", ""],
+    ["left", "<kbd>Ctrl</kbd> + დაწკაპუნება", "ამატებს ან აკლებს ობიექტს მონიშვნას. რამდენიმე ერთად მოძრაობს.", ""],
+    ["key",  "<kbd>Delete</kbd>", "შლის მონიშნულს.", ""],
+    ["key",  "<kbd>Ctrl</kbd>+<kbd>D</kbd>", "აკეთებს ასლს გვერდით.", ""]
+  ]],
+  ["ტრანსფორმა", [
+    ["drag", "ისარზე გადათრევა", "გადააადგილებ ერთი ღერძით. ზომა ეკრანზე იწერება.", ""],
+    ["drag", "ლურჯ ისარზე გადათრევა", "წევს მაღლა და დაბლა. ქალაქში ობიექტი რელიეფს სცილდება — ასე დგება ხიდი ან ჩრდილი.", ""],
+    ["drag", "კვადრატულ სახელურზე", "ატარებ ორ ღერძზე ერთდროულად, მიწის სიბრტყეში.", ""],
+    ["drag", "რგოლზე გადათრევა", "ატრიალებ. ქალაქში ერთი რგოლია: შენობა ქუჩისკენ ბრუნდება, გვერდზე არ წვება.", ""],
+    ["drag", "კუბიკზე გადათრევა", "ცვლი ზომას ერთი ღერძით. ლურჯი კუბიკი სიმაღლეა.", ""],
+    ["drag", "ყვითელ კუბზე ზემოთ-ქვემოთ", "ცვლი მთელ ზომას ერთდროულად.", ""],
+    ["key",  "<kbd>W</kbd> · <kbd>E</kbd> · <kbd>R</kbd>", "რთავს გადატანას, ბრუნვას და მასშტაბს.", ""],
+    ["drag", "ობიექტზე გადათრევა", "მოდელირებაში ნებისმიერ ფიგურას ატარებ. ქალაქში — მოცულობას ან მთელ ჯგუფს.", ""],
+    ["left", "⌗ მიბმა", "აყენებს ნაბიჯს: 1 მეტრი, 15 გრადუსი. ორივე მხარეს ცალკე ირთვება.", ""]
+  ]],
+  ["რეჟიმი", [
+    ["left", "ობიექტი · წახნაგი · წიბო · წვერო", "ირჩევ, მთელს ცვლი თუ ერთ ნაწილს. ოთხივე დონე ახლა ქალაქშიც არის.", ""],
+    ["drag", "წახნაგზე გადათრევა", "წევს წახნაგს გარეთ ან შიგნით და ფორმას ზრდის.", ""],
+    ["drag", "წიბოზე ან წვეროზე", "გადააადგილებ ერთ წიბოს ან წვეროს.", ""]
+  ]],
+  ["ხაზი და ფიგურა", [
+    ["left", "დაწკაპუნება მიწაზე", "დგამს არჩეულ ფიგურას. მერე ხელსაწყო მონიშვნას უბრუნდება.", ""],
+    ["left", "დაწკაპუნება კუთხეებზე", "ხაზავ ზონის კონტურს ან ბილიკს, წერტილ-წერტილ. ორივე ახლა მოდელირების ჩანართებშიცაა.", ""],
+    ["key",  "<kbd>Enter</kbd> ან ორმაგი დაწკაპუნება", "ხურავს კონტურს, ბილიკს ან საზღვარს.", ""],
+    ["key",  "<kbd>Esc</kbd>", "აუქმებს დაწყებულ ხაზს და ასუფთავებს რულეტს.", ""],
+    ["drag", "მართკუთხედის გადათრევა", "აშენებს მოცულობას. ორივე გვერდი ოთხ მეტრზე მეტი უნდა იყოს.", "ქალაქი"],
+    ["drag", "კუთხის სახელურზე", "ცვლი კონტურის ფორმას. შუა პატარა სახელური ახალ კუთხეს ამატებს.", "ქალაქი"],
+    ["left", "რულეტი — ორი დაწკაპუნება", "ზომავს მანძილს. მესამე დაწკაპუნება ახალ გაზომვას იწყებს.", ""]
+  ]],
+  ["ფაილი და ისტორია", [
+    ["key",   "<kbd>Ctrl</kbd>+<kbd>Z</kbd> · <kbd>Ctrl</kbd>+<kbd>Y</kbd>", "აბრუნებს და იმეორებს. ⟲ ⟳ ზედა ზოლში იგივეა.", ""],
+    ["key",   "<kbd>Ctrl</kbd>+<kbd>C</kbd> · <kbd>Ctrl</kbd>+<kbd>V</kbd>", "ატარებს მონიშნულს ერთი ჩანართიდან მეორეში.", ""],
+    ["key",   "<kbd>Ctrl</kbd>+<kbd>S</kbd> · <kbd>Ctrl</kbd>+<kbd>O</kbd>", "ინახავს და ხსნის გეგმას ფაილად.", ""],
+    ["right", "მარჯვენა ღილაკი ფიგურაზე", "ხსნის დაჩრდილვის მენიუს: გლუვი, ბრტყელი, ავტო-გლუვი.", "მოდელირება"]
+  ]]
+];
+
+function buildControls() {
+  var host = document.getElementById("ctlbody");
+  if (!host || host.children.length) return;
+  var h = "";
+  CTLROWS.forEach(function (sec) {
+    h += '<p class="cap">' + sec[0] + "</p>";
+    sec[1].forEach(function (r) {
+      var g = MG[r[0]] ? '<svg class="mg" viewBox="0 0 24 24" aria-hidden="true">' + MG[r[0]] + "</svg>" : "";
+      h += '<div class="r"><span class="g">' + g + '</span>' +
+           '<span class="k">' + r[1] + "</span>" +
+           "<span>" + r[2] + (r[3] ? ' <em>' + r[3] + "</em>" : "") + "</span></div>";
+    });
+  });
+  host.innerHTML = h;
+}
+function showControls() {
+  buildControls();
+  document.getElementById("ctlwrap").classList.add("on");
+}
+function hideControls() { document.getElementById("ctlwrap").classList.remove("on"); }
+function controlsOpen() { return document.getElementById("ctlwrap").classList.contains("on"); }
+document.getElementById("ctlbtn").addEventListener("click", showControls);
+document.getElementById("ctlclose").addEventListener("click", hideControls);
+document.getElementById("ctlwrap").addEventListener("click", function (ev) {
+  if (ev.target === this) hideControls();
+});
 
 // ---------------------------------------------------------------- file menu
 var fmWrap = document.getElementById("filemenu");
@@ -3698,7 +4293,16 @@ document.addEventListener("click", function (ev) {
 // away. Deliberately outside the main keydown handler, which ignores anything
 // typed into a field: naming a plan and then saving it is the normal order.
 window.addEventListener("keydown", function (ev) {
+  // Escape closes the help sheet and stops there. This listener runs before the
+  // main one, which would otherwise also reset the tool — a student who opened
+  // help in the middle of drawing must still have the tool in hand afterwards.
+  if (ev.key === "Escape" && controlsOpen()) {
+    hideControls(); ev.stopImmediatePropagation(); return;
+  }
   if (ev.key === "Escape") { fileMenu(false); return; }
+  // F1 deliberately sits in the unguarded listener: help has to open even when
+  // the cursor is in a panel field, which is exactly where a stuck student is.
+  if (ev.key === "F1") { ev.preventDefault(); showControls(); return; }
   if (!(ev.ctrlKey || ev.metaKey) || ev.altKey || ev.shiftKey) return;
   var k = (ev.key || "").toLowerCase();
   if (k === "s") { ev.preventDefault(); document.getElementById("save").click(); }
@@ -3817,6 +4421,9 @@ document.getElementById("shot").addEventListener("click", function () {
 
 window.addEventListener("keydown", function (ev) {
   if (ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+  // "?" belongs behind the field guard, or typing a question mark into a plan
+  // name would open the help sheet on top of what is being typed.
+  if (ev.key === "?") { ev.preventDefault(); showControls(); return; }
   // Ctrl/Cmd+Z undo, Ctrl+Y or Ctrl+Shift+Z redo — works in any tab
   if ((ev.ctrlKey || ev.metaKey) && !ev.altKey) {
     var kk = (ev.key || "").toLowerCase();
@@ -3828,6 +4435,12 @@ window.addEventListener("keydown", function (ev) {
     if (kk === "v") { ev.preventDefault(); doPaste(); return; }
   }
   if (!isCity()) {
+    if (ev.key === "Enter" && (SC.tool === "zone" || SC.tool === "path")) {
+      schFinishFlat(); return;
+    }
+    if ((ev.key === "Delete" || ev.key === "Backspace") && SC.flatSel != null) {
+      schDeleteFlat(SC.flatSel); return;
+    }
     if ((ev.key === "Delete" || ev.key === "Backspace") && SC.sel != null) {
       var a = schItems();
       schSelIds().forEach(function (q) {
@@ -3837,6 +4450,7 @@ window.addEventListener("keydown", function (ev) {
       schRebuild(); schSave();
     }
     if (ev.key === "Escape") {
+      schDraftPts = []; schClearDraft();
       SC.subSel = null; tapeClear(); setSchTool("select"); schRefreshHelpers();
     }
     if ((ev.ctrlKey || ev.metaKey) && (ev.key === "d" || ev.key === "D")) { ev.preventDefault(); schClone(); return; }
@@ -3858,8 +4472,9 @@ window.addEventListener("keydown", function (ev) {
     if (removeAreaPoint()) return;               // a chosen corner goes first
     if (state.selected != null) removeItem(state.selected);
   }
-  if (ev.key === "Escape") { draftPts = []; if (draftLine) { scene.remove(draftLine); draftLine = null; }
-    state.selPt = null; buildHandles(); renderProps(); tapeClear(); }
+  if (ev.key === "Escape") { draftPts = []; clearDraft();
+    state.selPt = null; state.subSel = null; cityRefreshSubHelpers();
+    buildHandles(); renderProps(); tapeClear(); }
 });
 
 // ---------------------------------------------------------------- loop
@@ -4190,16 +4805,24 @@ var SC = {
   paintColor: "#C7D2E1",
   snap: { on: false, move: 1, rot: 15, scale: 0.05 },
   group: new THREE.Group(),
-  helpers: new THREE.Group()
+  helpers: new THREE.Group(),
+  // ზონის კონტური and ბილიკი on the modelling tabs. They are drawn exactly the
+  // way ქალაქი draws them, but they are not meshes: an outline is a filled ring
+  // painted on the ground and a path is a ribbon along it, so they are kept in
+  // their own list and never reach the shape editor, the gizmo or the boolean.
+  flat: { A: [], B: [] },
+  flatSel: null,
+  flatGroup: new THREE.Group()
 };
 SC.scene.background = new THREE.Color(0x16253F);
 SC.scene.add(SC.group);
+SC.scene.add(SC.flatGroup);
 SC.scene.add(SC.helpers);
 
 // საბაზისო and სკოლა are separate documents — the same tools, different models.
 // SC.data / legend / planName / nextId / variant always mirror the active doc.
 function newDoc() {
-  return { data: { A: [], B: [] }, legend: JSON.parse(JSON.stringify(LEGEND0)),
+  return { data: { A: [], B: [] }, flat: { A: [], B: [] }, legend: JSON.parse(JSON.stringify(LEGEND0)),
            planName: "", nextId: 1, variant: "A" };
 }
 
@@ -4217,7 +4840,7 @@ SC.docs = { school: newDoc(), basic: newDoc(), scan: newScanDoc() };
 SC.activeDoc = "school";
 function flushDoc() {
   var d = docFor(SC.activeDoc);
-  d.data = SC.data; d.legend = SC.legend; d.planName = SC.planName;
+  d.data = SC.data; d.flat = SC.flat; d.legend = SC.legend; d.planName = SC.planName;
   d.nextId = SC.nextId; d.variant = SC.variant;
 }
 // The one place that promises a document exists. A file saved before a tab was
@@ -4233,11 +4856,15 @@ function useDoc(which) {
   SC.activeDoc = which;
   var d = docFor(which);
   SC.data = d.data; SC.legend = d.legend; SC.planName = d.planName;
+  // A document saved before ზონის კონტური existed has no flat list; give it one
+  // rather than letting every consumer test for the hole.
+  SC.flat = d.flat || (d.flat = { A: [], B: [] });
   SC.nextId = d.nextId; SC.variant = d.variant;
-  SC.sel = null; SC.subSel = null;
+  SC.sel = null; SC.subSel = null; SC.flatSel = null;
   if (which !== "basic") SC.paintFree = false;   // free colour is საბაზისო only
 }
 SC.docs.school.data = SC.data;      // start with the school doc live
+SC.docs.school.flat = SC.flat;
 SC.docs.school.legend = SC.legend;
 
 var schHemi = new THREE.HemisphereLight(0xdfe9ff, 0x33405c, 0.75);
@@ -4480,6 +5107,174 @@ function applyLighting() {
 applyLighting();
 
 function schItems() { return SC.data[SC.variant]; }
+
+// ---------------------------------------------------------------- studio flats
+// ზონის კონტური and ბილიკი on საბაზისო, სკოლა and სკანი. Same gesture as ქალაქი:
+// click the corners, Enter or a double click to close. The colour comes from the
+// team's own legend rather than from the eight statutory zones, because that is
+// what a legend means on these tabs.
+function schFlats() {
+  if (!SC.flat[SC.variant]) SC.flat[SC.variant] = [];
+  return SC.flat[SC.variant];
+}
+function schFlatFind(id) {
+  var a = schFlats();
+  for (var i = 0; i < a.length; i++) if (a[i].id === id) return a[i];
+  return null;
+}
+function flatColor(it) {
+  return it.color || legendById(it.legend).color || "#9AA6B2";
+}
+
+var schDraftPts = [], schDraftObjs = [];
+
+function schClearDraft() {
+  schDraftObjs.forEach(function (o) {
+    SC.scene.remove(o);
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) o.material.dispose();
+  });
+  schDraftObjs = [];
+}
+function schDraftClosing() { return SC.tool === "zone"; }
+function schDraftV(q) { return [q[0], groundAt(q[0], q[1]) + DRAFT_LIFT, q[1]]; }
+
+function schRefreshDraft(cursor) {
+  schClearDraft();
+  if (!schDraftPts.length) return;
+  function add(o, order) { o.renderOrder = order; SC.scene.add(o); schDraftObjs.push(o); }
+
+  var v = [];
+  schDraftPts.forEach(function (q) { v.push.apply(v, schDraftV(q)); });
+  if (schDraftClosing() && schDraftPts.length > 2) v.push.apply(v, schDraftV(schDraftPts[0]));
+  if (v.length >= 6) {
+    var g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+    add(new THREE.Line(g, new THREE.LineBasicMaterial({
+      color: DRAFT_RED, depthTest: false, transparent: true })), 1002);
+  }
+  var dg = new THREE.BufferGeometry();
+  dg.setAttribute("position", new THREE.Float32BufferAttribute(v.slice(0, schDraftPts.length * 3), 3));
+  add(new THREE.Points(dg, new THREE.PointsMaterial({
+    color: 0xFFFFFF, size: 9, sizeAttenuation: false, depthTest: false, transparent: true })), 1004);
+
+  if (cursor) {
+    var last = schDraftPts[schDraftPts.length - 1];
+    var gv = schDraftV(last).concat([cursor.x, groundAt(cursor.x, cursor.z) + DRAFT_LIFT, cursor.z]);
+    if (schDraftClosing() && schDraftPts.length > 1) gv = gv.concat(schDraftV(schDraftPts[0]));
+    var gg = new THREE.BufferGeometry();
+    gg.setAttribute("position", new THREE.Float32BufferAttribute(gv, 3));
+    add(new THREE.Line(gg, new THREE.LineBasicMaterial({
+      color: DRAFT_RED, depthTest: false, transparent: true, opacity: 0.55 })), 1001);
+  }
+}
+
+function schAddDraftPoint(p) {
+  schDraftPts.push([p.x, p.z]);
+  schRefreshDraft(null);
+  if (schDraftClosing()) {
+    document.getElementById("hint").innerHTML = schDraftPts.length < 3
+      ? "დააწკაპუნე კუთხეებზე. დასრულება — <kbd>Enter</kbd> ან ორმაგი დაწკაპუნება."
+      : "<b>" + fmtArea(ringArea(schDraftPts)) + "</b> · " + schDraftPts.length +
+        " წერტილი · დასრულება <kbd>Enter</kbd> ან ორმაგი დაწკაპუნება";
+  } else {
+    document.getElementById("hint").innerHTML = schDraftPts.length < 2
+      ? "დააწკაპუნე ხაზის წერტილებზე. დასრულება — <kbd>Enter</kbd> ან ორმაგი დაწკაპუნება."
+      : "<b>" + Math.round(pathLength({ pts: schDraftPts })).toLocaleString() +
+        " მ</b> · დასრულება <kbd>Enter</kbd> ან ორმაგი დაწკაპუნება";
+  }
+}
+
+function schFinishFlat() {
+  var closing = schDraftClosing();
+  if (closing ? schDraftPts.length > 2 : schDraftPts.length > 1) {
+    var it = { id: SC.nextId++, kind: closing ? "area" : "path",
+               pts: schDraftPts.slice(), legend: SC.paintId };
+    if (!closing) it.width = 3;
+    schFlats().push(it);
+    SC.flatSel = it.id; SC.sel = null; SC.subSel = null;
+    schRebuild(); schSave();
+  }
+  schDraftPts = [];
+  schClearDraft();
+}
+
+// Meshes. The studio ground is flat on საბაზისო and სკოლა and a surveyed
+// hillside on სკანი, so groundAt is the height function both of these drape on.
+function schMakeFlatMesh(it) {
+  var col = new THREE.Color(flatColor(it));
+  if (it.kind === "area") {
+    var g = drapedFill(it.pts, 0.35, 6, groundAt);
+    if (!g) return null;
+    var m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+      color: col, transparent: true, opacity: 0.42, side: THREE.DoubleSide,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2
+    }));
+    m.userData.flatId = it.id;
+    var ol = new THREE.Mesh(ribbonOnTerrain(it.pts, 1.2, groundAt),
+      new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide,
+        depthTest: false, transparent: true, opacity: 0.95 }));
+    ol.renderOrder = 3;
+    ol.userData.flatId = it.id;
+    m.add(ol);
+    return m;
+  }
+  var pos = [], nor = [];
+  ribbonInto(pos, nor, it.pts, it.width || 3, 0.3, 4, groundAt);
+  if (!pos.length) return null;
+  var pg = new THREE.BufferGeometry();
+  pg.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  pg.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  var pm = new THREE.Mesh(pg, new THREE.MeshLambertMaterial({
+    color: col, side: THREE.DoubleSide }));
+  pm.userData.flatId = it.id;
+  return pm;
+}
+
+function schRebuildFlats() {
+  for (var i = SC.flatGroup.children.length - 1; i >= 0; i--) {
+    var m = SC.flatGroup.children[i];
+    SC.flatGroup.remove(m);
+    if (m.geometry) m.geometry.dispose();
+    if (m.material) m.material.dispose();
+    m.children.forEach(function (c) { if (c.geometry) c.geometry.dispose(); });
+  }
+  schFlats().forEach(function (it) {
+    var m = schMakeFlatMesh(it);
+    if (m) {
+      if (SC.flatSel === it.id && m.material && m.material.emissive === undefined)
+        m.material.color.offsetHSL(0, 0, 0.18);   // a flat has no lighting to brighten
+      SC.flatGroup.add(m);
+    }
+  });
+}
+
+function schPickFlat(ev) {
+  if (!SC.flatGroup.children.length) return null;
+  ray.setFromCamera(pointer(ev), camera);
+  var hits = ray.intersectObjects(SC.flatGroup.children, true);
+  for (var i = 0; i < hits.length; i++) {
+    var o = hits[i].object;
+    while (o && o.userData.flatId == null) o = o.parent;
+    if (o) return o.userData.flatId;
+  }
+  return null;
+}
+
+function schSelectFlat(id) {
+  SC.flatSel = id;
+  if (id != null) { SC.sel = null; SC.selMore = []; SC.subSel = null; schRefreshHelpers(); }
+  schRebuildFlats();
+  schRenderPanel();
+}
+
+function schDeleteFlat(id) {
+  var a = schFlats();
+  for (var i = 0; i < a.length; i++)
+    if (a[i].id === id) { a.splice(i, 1); break; }
+  if (SC.flatSel === id) SC.flatSel = null;
+  schRebuild(); schSave();
+}
 
 // ---------------------------------------------------------------- clone
 // Day 3 Block 2 builds a district: a row of identical blocks and secondary masses,
@@ -4829,6 +5624,7 @@ function schRebuild() {
     mesh.userData.id = sh.id;
     SC.group.add(mesh);
   });
+  schRebuildFlats();
   schRefreshHelpers();
   placeHuman();
   schRenderPanel();
@@ -5794,6 +6590,13 @@ function schPointerDown(ev) {
   var gh = (ev.ctrlKey || ev.metaKey) ? null : gizmoPick(ev);
   if (gh && gizmoStart(ev, gh)) return;
 
+  // An outline or a path is placed one corner at a time, on the ground.
+  if (SC.tool === "zone" || SC.tool === "path") {
+    var fp = schGroundPoint(ev);
+    if (fp) schAddDraftPoint(fp);
+    return;
+  }
+
   if (SC.tool.indexOf("prim:") === 0) {
     var g = schGroundPoint(ev, 0);
     if (!g) return;
@@ -5867,10 +6670,20 @@ function schPointerDown(ev) {
     return;
   }
 
-  if (!hit) { schSelect(null, null); schDrag = { mode: "orbit", x: ev.clientX, y: ev.clientY }; return; }
+  if (!hit) {
+    // Nothing solid under the cursor — but an outline or a path lies on the
+    // ground, so it is only reachable once the shapes have all missed.
+    var fid = schPickFlat(ev);
+    if (fid != null) { schSelectFlat(fid); return; }
+    schSelect(null, null);
+    if (SC.flatSel != null) schSelectFlat(null);
+    schDrag = { mode: "orbit", x: ev.clientX, y: ev.clientY };
+    return;
+  }
 
   var sh = schFind(hit.object.userData.id);
   if (!sh) return;
+  if (SC.flatSel != null) schSelectFlat(null);   // picking a solid drops the flat
 
   if (SC.sub === "object") {
     // Ctrl+click edits the set and starts no drag, so adding a shape cannot
@@ -5927,6 +6740,8 @@ function schPointerMove(ev) {
     if (lp) { SC.tape.live = lp; tapeRefresh(); }
   }
   if (GIZ.drag) { gizmoMove(ev); return; }
+  // the band to the cursor, so the next segment is visible before it is placed
+  if (!schDrag && schDraftPts.length) { schRefreshDraft(schGroundPoint(ev)); return; }
   if (!schDrag) return;
   var sh = schDrag.id != null ? schFind(schDrag.id) : null;
 
@@ -6081,6 +6896,8 @@ function showShadeMenu(ev, sh) {
 // ---------------------------------------------------------------- school UI
 function setSchTool(t) {
   if (t !== "tape") tapeClear();      // don't leave a stray measurement on screen
+  // Leaving the drawing tool closes what was being drawn, the way the map does.
+  if ((SC.tool === "zone" || SC.tool === "path") && t !== SC.tool) schFinishFlat();
   hideCtxMenu();
   SC.tool = t;
   // only the tool buttons — the sub/gizmo/snap buttons also carry class "tool"
@@ -6102,6 +6919,8 @@ function setSchTool(t) {
   else if (t === "human")  h = "დააწკაპუნე მიწაზე, სადაც გინდა, რომ ადამიანი დადგეს. სიმაღლე 1,75 მ.";
   else if (t === "tape")   h = "დააწკაპუნე საწყის წერტილზე, გადაიტანე და კვლავ დააწკაპუნე. <kbd>Esc</kbd> ასუფთავებს.";
   else if (t === "subtract") h = "დააწკაპუნე ფიგურას, რომელიც უნდა გამოაკლო. <kbd>Esc</kbd> აუქმებს.";
+  else if (t === "zone") h = "დააწკაპუნე კუთხეებზე და მონიშნე ზონა. დასრულება — <kbd>Enter</kbd> ან ორმაგი დაწკაპუნება.";
+  else if (t === "path") h = "დააწკაპუნე ხაზის წერტილებზე. დასრულება — <kbd>Enter</kbd> ან ორმაგი დაწკაპუნება.";
   document.getElementById("hint").innerHTML = h;
 }
 function setSchSub(s) {
@@ -6117,6 +6936,7 @@ function setSchSub(s) {
 
 (function buildSchoolRail() {
   buildCityPrims();                 // same list, and PRIMS is in scope by here
+  buildCitySub();                  // SUBMODES is in scope by here too
   var r = document.getElementById("railSchool");
   var h = '<div class="railcap">ფიგურა</div>';
   PRIMS.forEach(function (p) {
@@ -6136,6 +6956,10 @@ function setSchSub(s) {
        '<button class="tool snapbtn" data-snap="1"><span class="ic">⌗</span>მიბმა</button>' +
        '<button class="tool" data-stool="tape"><span class="ic">📏</span>რულეტი</button>' +
        '<button class="tool" data-stool="subtract"><span class="ic">⊖</span>გამოკლება</button>';
+  h += '<div class="railcap">ზონირება</div>' +
+       '<button class="tool" data-stool="zone"><span class="ic">⬠</span>ზონის კონტური</button>' +
+       '<div class="railcap">ხაზი</div>' +
+       '<button class="tool" data-stool="path"><span class="ic">〜</span>ბილიკი</button>';
   h += '<div class="railcap">მასშტაბი</div>' +
        '<button class="tool" data-stool="human"><span class="ic">☖</span>ადამიანი</button>';
   h += '<div class="railcap">ფერი</div>' +
@@ -6252,6 +7076,43 @@ function schRenderPanel() {
           (SC.planName || "").replace(/"/g, "&quot;") + '"></section>';
 
   h += '<section><h3>ᲠᲔᲓᲐᲥᲢᲘᲠᲔᲑᲐ</h3>';
+  var fl = SC.flatSel != null ? schFlatFind(SC.flatSel) : null;
+  if (fl) {
+    // An outline has an area, a path has a length and a width. Neither has a
+    // name, a shade or a boolean, so the panel says only what is true of it.
+    h += '<div class="row"><label>' + (fl.kind === "area" ? "კონტური" : "ხაზი") +
+         '</label><span class="val auto">' +
+         (fl.kind === "area" ? fmtArea(ringArea(fl.pts))
+                             : Math.round(pathLength(fl)).toLocaleString() + " მ") +
+         '</span></div>';
+    h += '<div class="row"><label>წერტილი</label><span class="val auto">' +
+         fl.pts.length + '</span></div>';
+    if (fl.kind === "path")
+      h += '<div class="row"><label>სიგანე</label>' +
+           '<input type="number" id="flW" min="1" max="40" step="0.5" value="' +
+           (fl.width || 3) + '"><span class="val">მ</span></div>';
+    h += '<div class="row"><label>ლეგენდა</label><select id="flLeg">';
+    SC.legend.forEach(function (L) {
+      h += '<option value="' + L.id + '"' + (L.id === fl.legend ? " selected" : "") + '>' +
+           legName(L) + "</option>";
+    });
+    h += '</select></div>';
+    h += '<button class="danger" id="flDel">წაშლა</button>';
+    h += "</section>";
+    box.innerHTML = h;
+    var wEl = document.getElementById("flW");
+    if (wEl) wEl.onchange = function () {
+      var v = parseFloat(this.value);
+      if (isFinite(v)) { fl.width = Math.max(1, Math.min(40, v)); schRebuild(); schSave(); }
+    };
+    document.getElementById("flLeg").onchange = function () {
+      fl.legend = this.value; delete fl.color; schRebuild(); schSave();
+    };
+    document.getElementById("flDel").onclick = function () { schDeleteFlat(fl.id); };
+    var nEl0 = document.getElementById("schName");
+    if (nEl0) nEl0.onchange = function () { SC.planName = this.value; schSave(); };
+    return;
+  }
   if (!sh) {
     h += '<p class="empty">მონიშნე ფიგურა.</p>';
   } else {
@@ -6720,7 +7581,7 @@ function setTab(t) {
   }
   else {
     if (state.town === "scan") loadTown(state.lastCity || "telavi");
-    setTool(state.tool); setCityGiz(state.cgiz); rebuild();
+    setTool(state.tool); setCityGiz(state.cgiz); setCitySub(state.sub); rebuild();
     var cb = document.querySelector("#railCity .csnapbtn");
     if (cb) cb.classList.toggle("on", state.snap.on);
   }
@@ -6813,6 +7674,18 @@ function setView(v) {
   var b = document.querySelector('#viewseg button[data-view="' + v + '"]');
   if (b) b.click();
 }
+// Show the control sheet once, the first time this browser ever opens the app.
+// The students who need it most are exactly the ones who will never press a
+// small i. Never during a selftest run, which asserts against the live DOM.
+if (!/[?&]selftest=1/.test(location.search)) {
+  try {
+    if (!localStorage.getItem("bekura3d-ctlseen")) {
+      showControls();
+      localStorage.setItem("bekura3d-ctlseen", "1");
+    }
+  } catch (e) { /* an opaque file:// origin can throw; help is never worth a boot failure */ }
+}
+
 if (/[?&]debug=1/.test(location.search)) {
   window.__bekura3d = window.__maketi = { state: state, orbit: orbit, panBy: panBy, setView: setView,
                       SC: SC, GIZ: GIZ, schSelect: schSelect, setGizMode: setGizMode,
