@@ -81,7 +81,7 @@ To rebuild the ground textures from source (needs internet):
 
     bash data/make-maps.sh
 
-`?selftest=1` runs 210 assertions in the page and prints the results over it. Run it
+`?selftest=1` runs 218 assertions in the page and prints the results over it. Run it
 before shipping a build, and run it on `bekura3d.html` rather than on `app.html`:
 the bundle is what students open, and three of the assertions need the ground
 textures that only the bundle carries inline.
@@ -467,8 +467,29 @@ against the working-area ring, rather than by laying a white surface over the gr
 not a detail: a street ribbon is flat across its own width, so where the terrain ridges under
 one the road clears the ground by about a centimetre. Anything slipped into that gap comes
 back through the street in fragments whatever height it is given. Painting the ground has
-nothing to compete with, and the streets, the zoning and the red line stay exactly where they
-have always been.
+nothing to compete with.
+
+**The streets and the existing buildings go too**, which whiting the ground alone did not do:
+both are their own geometry standing above it, so the sheet went white and the town stayed
+drawn straight across it — the map was still readable through the thing meant to hide it.
+They are removed two different ways, because they are two different kinds of thing:
+
+- **Streets** are cut in the *street* shader, by the same ring test the ground runs, sharing
+  the same uniforms so the two can never disagree about where the edge is. The cut lands
+  exactly on the red line. Dropping whole streets instead would erase them far outside the
+  area as well, since one street is a single polyline that merely happens to cross it, and
+  splitting each one at the boundary would be a lot of code for the same picture. Nothing is
+  destroyed: the geometry is untouched and the switch is a uniform, so it comes back in a frame.
+- **Existing buildings** are dropped from the geometry instead, and the test tightens from
+  "centroid inside" to **any corner inside**, so one straddling the line goes as well. Whole,
+  not cut: a wall sliced off in mid-air on the boundary would look worse than the building
+  being gone. Removing the footprint also takes its shadow, which a shader cut could not —
+  the shadow map is drawn with three.js's own depth material and would not carry the cut,
+  leaving a shadow lying on the sheet with nothing above it to cast one.
+
+What survives inside the line is the red boundary itself and the students' own work. The
+terrain still shades, so the slope of the site is still readable — the sheet is white paper
+laid over the hill, not a flat plane.
 
 ## Keeping work when you ship a new build
 

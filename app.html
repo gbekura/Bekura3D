@@ -485,7 +485,7 @@
        <button id="gnd-sat" title="აეროფოტო: რა დგას მიწაზე სინამდვილეში">სატელიტი</button>
      </div>
      <div class="vrow" id="whiterow" style="margin-top:7px">
-       <button class="vbtn" id="whitebtn" title="ცარიელი თეთრი ფურცელი წითელი საზღვრის შიგნით. გარეთ რუკა უცვლელი რჩება; ხაზი, ქუჩები და შენი გეგმა — ფურცლის თავზე">
+       <button class="vbtn" id="whitebtn" title="ცარიელი თეთრი ფურცელი წითელი საზღვრის შიგნით: რუკა, ქუჩები და არსებული შენობები ქრება. გარეთ ქალაქი უცვლელი რჩება; შიგნით მხოლოდ საზღვარი და შენი გეგმა">
          <span class="vi">▢</span>თეთრი ფონი</button>
      </div>
    </section>
@@ -858,8 +858,15 @@ var groundMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
 // its width, so where the terrain ridges under one the road clears the ground by
 // about a centimetre, and anything slipped into that gap surfaces through the
 // street in fragments no matter what height it is given. The ground has nothing
-// to compete with — the streets, the zoning and the red line all stay where they
-// have always been, and there is one surface where there was one before.
+// to compete with, and there is one surface where there was one before.
+//
+// The same test then runs a second time in the STREET shader, where it discards
+// instead of painting. The streets are their own geometry sitting above the
+// ground, so whiting the ground left them drawn across the empty sheet — the
+// map was still legible through the thing meant to hide it. Discarding cuts
+// them exactly on the red line: outside it the town is untouched, inside it
+// there is nothing but what the students put there. The zoning, the red line
+// and every student object are separate meshes and are not touched by any of it.
 var WOMAX = 64;                       // ring corners the shader can carry
 var WO = {
   on:   { value: 0 },
@@ -871,33 +878,49 @@ var WO = {
           })() }
 };
 
-groundMat.onBeforeCompile = function (sh) {
+// The crossing test, walked edge by edge, as a function so the ground and the
+// streets cannot drift apart: two copies of a point-in-polygon test that have to
+// agree on where the edge is would eventually disagree by a pixel along it.
+// Storing the ring closed — poly[n] repeats poly[0] — means both subscripts are
+// the loop counter, which keeps this legal on WebGL 1 as well, where an array
+// index has to be one.
+var WO_GLSL =
+  "varying vec2 vGround;\nuniform int woOn;\nuniform int woN;\n" +
+  "uniform vec2 woPoly[" + (WOMAX + 1) + "];\n" +
+  "bool woInside(vec2 p) {\n" +
+  "  bool ins = false;\n" +
+  "  for (int i = 0; i < " + WOMAX + "; i++) {\n" +
+  "    if (i >= woN) break;\n" +
+  "    vec2 pa = woPoly[i], pb = woPoly[i + 1];\n" +
+  "    if (((pa.y > p.y) != (pb.y > p.y)) &&\n" +
+  "        (p.x < (pb.x - pa.x) * (p.y - pa.y) / (pb.y - pa.y) + pa.x))\n" +
+  "      ins = !ins;\n" +
+  "  }\n" +
+  "  return ins;\n" +
+  "}\n";
+
+// anchor differs by what the body needs: the ground rewrites diffuseColor, which
+// only exists after <color_fragment>, while a discard is cheapest before any of
+// the shading work and so goes in at <clipping_planes_fragment>. A replace that
+// finds nothing returns the string unchanged and would fail silently, so the
+// anchor is checked rather than assumed.
+function woHook(sh, anchor, body) {
   sh.uniforms.woOn = WO.on;
   sh.uniforms.woN = WO.n;
   sh.uniforms.woPoly = WO.poly;
   sh.vertexShader = "varying vec2 vGround;\n" + sh.vertexShader.replace(
     "#include <begin_vertex>",
     "#include <begin_vertex>\n  vGround = (modelMatrix * vec4(position, 1.0)).xz;");
-  // The crossing test, walked edge by edge. Storing the ring closed — poly[n]
-  // repeats poly[0] — means both subscripts are the loop counter, which keeps
-  // this legal on WebGL 1 as well, where an array index has to be one.
-  sh.fragmentShader =
-    "varying vec2 vGround;\nuniform int woOn;\nuniform int woN;\n" +
-    "uniform vec2 woPoly[" + (WOMAX + 1) + "];\n" +
-    sh.fragmentShader.replace(
-      "#include <color_fragment>",
-      "#include <color_fragment>\n" +
-      "  if (woOn == 1) {\n" +
-      "    bool ins = false;\n" +
-      "    for (int i = 0; i < " + WOMAX + "; i++) {\n" +
-      "      if (i >= woN) break;\n" +
-      "      vec2 pa = woPoly[i], pb = woPoly[i + 1];\n" +
-      "      if (((pa.y > vGround.y) != (pb.y > vGround.y)) &&\n" +
-      "          (vGround.x < (pb.x - pa.x) * (vGround.y - pa.y) / (pb.y - pa.y) + pa.x))\n" +
-      "        ins = !ins;\n" +
-      "    }\n" +
-      "    if (ins) diffuseColor.rgb = vec3(1.0);\n" +
-      "  }");
+  if (sh.fragmentShader.indexOf(anchor) < 0) {
+    if (window.console) console.warn("Bekura3D: white-out anchor missing: " + anchor);
+    return;
+  }
+  sh.fragmentShader = WO_GLSL + sh.fragmentShader.replace(
+    anchor, anchor + "\n  if (woOn == 1 && woInside(vGround)) { " + body + " }");
+}
+
+groundMat.onBeforeCompile = function (sh) {
+  woHook(sh, "#include <color_fragment>", "diffuseColor.rgb = vec3(1.0);");
 };
 
 // Hand the shader the ring it should paint inside, in world x and z.
@@ -984,6 +1007,9 @@ function setGround(which) {
 function toggleMapWhite() {
   state.mapWhite = !state.mapWhite;
   syncWhiteOut();
+  // The streets follow the uniform on the next frame, but the buildings are a
+  // filter over the data, so the footprints have to be sorted again both ways.
+  refreshContext(true);
   syncViewBtns();
   save();
 }
@@ -1052,6 +1078,18 @@ function terrainAt(x, z) {
 var ctxMesh = null, roadMesh = null;
 var ctxMat = new THREE.MeshLambertMaterial({ color: 0xe2e7ee });
 var roadMat = new THREE.MeshLambertMaterial({ color: 0x9aa6b8 });
+
+// Streets stop at the red line while თეთრი ფონი is on. Cutting them in the
+// shader rather than out of the geometry is what makes the edge land exactly on
+// the boundary: a street is one long polyline that happens to cross the area, so
+// dropping whole ones would erase them far outside it as well, and splitting
+// them at the edge would be a lot of code for the same picture this gets for
+// free. Nothing is destroyed — the geometry is intact and the toggle is a
+// uniform, so switching back costs a frame. Buildings are handled the other way,
+// in refreshContext: see the note there.
+roadMat.onBeforeCompile = function (sh) {
+  woHook(sh, "#include <clipping_planes_fragment>", "discard;");
+};
 
 function ringSignedArea(r) {
   var a = 0, n = r.length / 2;
@@ -1148,6 +1186,17 @@ function ringInSite(r, ring) {
   var sx = 0, sz = 0, n = r.length / 2;
   for (var i = 0; i < n; i++) { sx += r[i * 2]; sz += r[i * 2 + 1]; }
   return inRing(sx / n, sz / n, ring);
+}
+// The stricter test, for თეთრი ფონი: any corner inside at all. The centroid rule
+// keeps a building that straddles the boundary, which is right when the map is
+// showing — half of it really does stand outside the district — but on a blank
+// sheet that half is the whole town leaking back in. A wall cut off in mid-air
+// on the red line would look worse than the building being gone, so unlike the
+// streets these go out whole.
+function ringTouchesSite(r, ring) {
+  for (var i = 0; i < r.length / 2; i++)
+    if (inRing(r[i * 2], r[i * 2 + 1], ring)) return true;
+  return false;
 }
 
 
@@ -1477,8 +1526,14 @@ function refreshContext(keepUI) {
     // Whatever stands inside the district boundary is cleared: the team is
     // designing that ground, so leaving the old buildings there would put their
     // masses inside somebody else's walls.
+    // On a blank sheet the test tightens to "touches at all", so a building
+    // straddling the line goes too. Dropping the whole footprint also takes its
+    // shadow with it, which a shader discard could not do: the shadow map is
+    // drawn with three.js's own depth material and would not carry the discard,
+    // leaving a shadow on the sheet with nothing above it to cast one.
     var site = siteRing(state.town);
-    var list = site ? d.b.filter(function (r) { return !ringInSite(r, site); }) : d.b;
+    var hit = state.mapWhite ? ringTouchesSite : ringInSite;
+    var list = site ? d.b.filter(function (r) { return !hit(r, site); }) : d.b;
     ctxMesh = new THREE.Mesh(buildContext(list, state.ctxH), ctxMat);
     ctxMesh.castShadow = true;
     ctxMesh.receiveShadow = true;
@@ -8364,6 +8419,37 @@ if (/[?&]selftest=1/.test(location.search)) {
   state.ground = _g0; state.mapWhite = _w0;
   syncWhiteOut();
   applyGround(state.town);
+
+  // ---- and nothing of the map is left inside the sheet ---------------------
+  // Whiting the ground was only half of it: the streets are their own geometry
+  // above it and stayed drawn across the blank area, so the map was still
+  // readable through the thing meant to hide it.
+  var _wr = [[0, 0], [100, 0], [100, 100], [0, 100]];
+  var _straddle = [90, 10, 130, 10, 130, 20, 90, 20];
+  want("a footprint inside the area counts as inside",
+       ringInSite([10, 10, 20, 10, 20, 20, 10, 20], _wr) ? "in" : "out", "in");
+  want("one straddling the edge keeps its centroid outside",
+       ringInSite(_straddle, _wr) ? "in" : "out", "out");
+  want("so the blank sheet asks the stricter question instead",
+       ringTouchesSite(_straddle, _wr) ? "touch" : "clear", "touch");
+  want("which still leaves a footprint wholly outside alone",
+       ringTouchesSite([200, 10, 240, 10, 240, 20, 200, 20], _wr) ? "touch" : "clear", "clear");
+
+  // The street cut is a shader edit and cannot be sampled from here, so what is
+  // checked is that the edit is made at all: String.replace on a missing anchor
+  // returns the string unchanged, which would take the streets back silently.
+  var _fs = { uniforms: {},
+              vertexShader: "void main() {\n#include <begin_vertex>\n}",
+              fragmentShader: "void main() {\n#include <clipping_planes_fragment>\n}" };
+  woHook(_fs, "#include <clipping_planes_fragment>", "discard;");
+  want("the street shader really receives the cut",
+       _fs.fragmentShader.indexOf("discard;") >= 0 ? "cut" : "missing", "cut");
+  want("the polygon test travels with it",
+       _fs.fragmentShader.indexOf("bool woInside") >= 0 ? "yes" : "no", "yes");
+  want("and the ground position reaches the fragment stage",
+       _fs.vertexShader.indexOf("vGround =") >= 0 ? "yes" : "no", "yes");
+  want("the cut reads the same uniforms as the sheet, not a second copy",
+       _fs.uniforms.woOn === WO.on ? "shared" : "separate", "shared");
 
   // ---- inset --------------------------------------------------------------
   var insBox = pBox(10, 10, 10);
