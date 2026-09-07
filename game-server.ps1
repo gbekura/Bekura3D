@@ -15,7 +15,10 @@
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+# 8830 unless the environment says otherwise. A second one on another port is
+# occasionally useful for trying something without disturbing a running lesson.
 $port = 8830
+if ($env:BEKURA3D_PORT -match '^\d+$') { $port = [int]$env:BEKURA3D_PORT }
 
 # The page to serve: the built one-file bundle, or the source if nobody has run
 # build-game.sh here. The bundle's name is Georgian and this file is ASCII --
@@ -30,6 +33,14 @@ if (-not (Test-Path -LiteralPath $page)) {
   Write-Host "  No game page here. Run this from the Bekura3D folder."
   exit 1
 }
+
+# What "/" hands out. The planner is the app the class actually plays now -- all
+# five games and the lobby live in it -- so the bare address a trainer writes on
+# the board has to land there. It used to land on the standalone page, whose only
+# remaining game is the sun duel, so a child who joined a planner host arrived in
+# a different program and nothing worked.
+$homePage = Join-Path $root 'bekura3d.html'
+if (-not (Test-Path -LiteralPath $homePage)) { $homePage = $page }
 
 $rooms = @{}      # room id -> append-only message log
 $reg   = @{}      # room id -> the host's own announcement, plus when it last spoke
@@ -98,8 +109,12 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
            ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin -and -not $env:BEKURA3D_NOELEVATE) {
   try {
+    # The path must carry its own quotes: Start-Process joins the array and hands
+    # ShellExecute one string, so an installed copy under "C:\Program Files\..."
+    # arrived as two broken arguments and BOTH windows vanished with no server.
     Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList @(
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath) | Out-Null
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+      ('"' + $PSCommandPath + '"')) | Out-Null
     exit 7
   } catch {
     # They said no. Carry on -- the listener below falls back to localhost and
@@ -219,7 +234,12 @@ while ($listener.IsListening) {
         $sr = New-Object System.IO.StreamReader($req.InputStream, [System.Text.Encoding]::UTF8)
         $body = $sr.ReadToEnd(); $sr.Close()
         $rm = $req.QueryString['room']
-        if ($rm) { $reg[$rm] = @{ body = $body; ts = [DateTime]::UtcNow } }
+        # close=1 takes a room off the list at once. A room with both its players
+        # in it is not an open room, and waiting twenty-five seconds for the
+        # heartbeat to lapse means a class full of children tapping a name that
+        # will never answer them.
+        if ($rm -and $req.QueryString['close']) { $reg.Remove($rm) }
+        elseif ($rm) { $reg[$rm] = @{ body = $body; ts = [DateTime]::UtcNow } }
         $out = '{"ok":1}'
       } else {
         # A host that has stopped saying it is there is gone: a laptop that was
@@ -274,7 +294,16 @@ while ($listener.IsListening) {
       continue
     }
 
-    if ($path -eq '/' -or $path -eq '/index.html' -or $path -like '*game*.html' -or
+    # The bare address goes to the planner; the standalone page keeps its own name.
+    if ($path -eq '/' -or $path -eq '/index.html') {
+      $bytes = [System.IO.File]::ReadAllBytes($homePage)
+      $res.ContentType = 'text/html; charset=utf-8'
+      $res.ContentLength64 = $bytes.Length
+      $res.OutputStream.Write($bytes, 0, $bytes.Length)
+      $res.Close()
+      continue
+    }
+    if ($path -like '*game*.html' -or
         $path -like '*%E1%83%97%E1%83%90%E1%83%9B%E1%83%90%E1%83%A8%E1%83%98*') {
       $bytes = [System.IO.File]::ReadAllBytes($page)
       $res.ContentType = 'text/html; charset=utf-8'
@@ -286,10 +315,22 @@ while ($listener.IsListening) {
 
     # Anything else that really is a file next to us -- three.min.js when the
     # unbuilt source is being served.
+    # Only the handful of things a page legitimately asks for, and only from this
+    # folder. This is a classroom network, and the folder is a git checkout: the
+    # old guard compared the UNRESOLVED path against $root, so ".." was answered
+    # by http.sys's canonicalisation rather than by anything here, and .git was
+    # served to anyone who asked for it.
     $rel = [System.Uri]::UnescapeDataString($path.TrimStart('/'))
     $file = Join-Path $root $rel
-    if ($rel -and (Test-Path -LiteralPath $file -PathType Leaf) -and
-        $file.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $full = $null
+    try { $full = [System.IO.Path]::GetFullPath($file) } catch { $full = $null }
+    $rootFull = [System.IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
+    $okName = ($rel -notmatch '(^|[\\/])\.') -and ($rel -notmatch '\.\.')
+    if ($rel -and $okName -and $full -and
+        $full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase) -and
+        (Test-Path -LiteralPath $full -PathType Leaf) -and
+        ($full -match '\.(html|js|css|json|png|jpg|jpeg|svg|woff2?|ttf|otf)$')) {
+      $file = $full
       $bytes = [System.IO.File]::ReadAllBytes($file)
       # bekura3d.html is served from here too, so a class can open the planner
       # itself off the trainer's laptop and play across the room with nothing to

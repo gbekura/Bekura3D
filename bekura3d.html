@@ -318,9 +318,15 @@
   #gpwrap{position:fixed;inset:0;background:rgba(8,14,24,.72);z-index:60;display:none;
         place-items:center;padding:20px}
   #gpwrap.on{display:grid}
-  #gp{width:min(620px,94vw);max-height:88vh;overflow-y:auto;background:var(--navy);
+  /* The panel is a column with ONE scrolling part: the list. The heading and the
+     buttons stay put, so უკან and გაუქმება are never pushed off a small screen —
+     which is where they went on a 1366x768 laptop, the size the classroom has. */
+  #gp{width:min(620px,94vw);max-height:88vh;display:flex;flex-direction:column;
+        background:var(--navy);
         border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:24px 26px;
         box-shadow:0 26px 70px rgba(0,0,0,.6)}
+  #gplist{overflow-y:auto;min-height:0}
+  #gpfoot{flex:none}
   #gp h3{font-size:11px;letter-spacing:1.6px;color:rgba(255,255,255,.45);
         text-transform:uppercase;margin:0 0 10px}
   #gp p{font-size:13.5px;line-height:1.55;color:rgba(255,255,255,.72);margin:0 0 14px}
@@ -332,6 +338,12 @@
   #gplist button:hover{background:rgba(51,190,196,.16);border-color:var(--cyan)}
   #gplist b{display:block;font-size:15px;margin-bottom:2px}
   #gplist span{font-size:12.5px;color:rgba(255,255,255,.55)}
+  #gplist .hdr{font-size:9.5px;letter-spacing:1.4px;color:rgba(255,255,255,.42);
+        text-transform:uppercase;padding:6px 2px 0}
+  #gplist .hdr:first-child{padding-top:0}
+  /* somebody is waiting right now: it should not look like the other rows */
+  #gplist button.live{background:rgba(51,190,196,.16);border-color:var(--cyan)}
+  #gplist button.live:hover{background:rgba(51,190,196,.26)}
   /* the lobby wears the chooser's clothes: same overlay, same rows */
   #gpname{width:100%;margin-bottom:10px;padding:10px 12px;border-radius:10px;
         background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);
@@ -609,7 +621,10 @@
        ყველა თამაში ნამდვილი ხელსაწყოებით თამაშდება.</p>
     <input id="gpname" type="text" maxlength="24" placeholder="შენი სახელი" style="display:none">
     <div id="gplist"></div>
-    <button class="mini" id="gpclose" style="width:100%;margin-top:6px">გაუქმება</button>
+    <div id="gpfoot" style="display:flex;gap:8px;margin-top:6px">
+      <button class="mini" id="gpback" style="flex:1;display:none">უკან</button>
+      <button class="mini" id="gpclose" style="flex:1">გაუქმება</button>
+    </div>
   </div></div>
 
   <div id="ctlwrap"><div id="ctl">
@@ -1125,7 +1140,7 @@ var SITERING = null;
 // Which commit this bundle was built from. A pure function of HEAD, never the
 // clock, so rebuilding without a new commit still reproduces the file byte for
 // byte. Null when built outside a checkout.
-var BUILD = {"c":"2cdb742","d":"2026-09-07"};
+var BUILD = {"c":"a014a94","d":"2026-09-07"};
 
 // Working areas that SHIP with the tool, one ring per town, from data/sites.json.
 // A trainer draws the district once with the ტერიტორია tool, the ring is baked
@@ -3369,9 +3384,19 @@ function schGroupRotate(ids, axisId, ang, p) {
   _gq.setFromAxisAngle(axis, ang);
   ids.forEach(function (id) {
     var sh = schFind(id); if (!sh) return;
-    rotateVerts(sh, schAllIdx(sh), axis, ang, schShapeCentre(sh));
-    _gv.set(sh.pos[0] - p.x, sh.pos[1] - p.y, sh.pos[2] - p.z).applyQuaternion(_gq);
-    sh.pos[0] = _gv.x + p.x; sh.pos[1] = _gv.y + p.y; sh.pos[2] = _gv.z + p.z;
+    // Carry the shape's CENTRE round the pivot, not its pos. The two are only
+    // the same thing when a shape's origin happens to sit at its middle, and
+    // plenty do not: a boolean result keeps pos at zero with the geometry out in
+    // world coordinates, and a pushed face moves the middle without moving pos.
+    // Turning those by pos threw them across the site while their neighbours
+    // turned properly — a group that is supposed to move as one solid piece.
+    // The city half has always done it this way; see cityGroupRotate.
+    var c = schShapeCentre(sh);
+    rotateVerts(sh, schAllIdx(sh), axis, ang, c);        // spin on its own axis
+    _gv.set(c.x - p.x, c.y - p.y, c.z - p.z).applyQuaternion(_gq);
+    sh.pos[0] += (_gv.x + p.x) - c.x;                    // and carry it round
+    sh.pos[1] += (_gv.y + p.y) - c.y;
+    sh.pos[2] += (_gv.z + p.z) - c.z;
     if (!sh.rot) sh.rot = [0, 0, 0];
     sh.rot[ri] = (sh.rot[ri] || 0) + ang * 180 / Math.PI;
     regeom(sh);
@@ -3384,11 +3409,16 @@ function schGroupScale(ids, axisId, k, p) {
   var uniform = axisId === "xyz", a = uniform ? null : axisById(axisId).v;
   ids.forEach(function (id) {
     var sh = schFind(id); if (!sh) return;
-    scaleVertsAxis(sh, schAllIdx(sh), axisId, k, schShapeCentre(sh));
-    _gv.set(sh.pos[0] - p.x, sh.pos[1] - p.y, sh.pos[2] - p.z);
+    // Same rule as the rotate above: the centre is what moves away from the
+    // pivot, and pos follows it.
+    var c = schShapeCentre(sh);
+    scaleVertsAxis(sh, schAllIdx(sh), axisId, k, c);
+    _gv.set(c.x - p.x, c.y - p.y, c.z - p.z);
     if (uniform) _gv.multiplyScalar(k);
     else _gv.addScaledVector(a, _gv.dot(a) * (k - 1));
-    sh.pos[0] = _gv.x + p.x; sh.pos[1] = _gv.y + p.y; sh.pos[2] = _gv.z + p.z;
+    sh.pos[0] += (_gv.x + p.x) - c.x;
+    sh.pos[1] += (_gv.y + p.y) - c.y;
+    sh.pos[2] += (_gv.z + p.z) - c.z;
     regeom(sh);
     var m = schMeshFor(id);
     if (m) m.position.set(sh.pos[0], sh.pos[1], sh.pos[2]);
@@ -4843,7 +4873,8 @@ function showUpdate() {
 // The dropdown closes itself on any click inside it (see the #filepop handler
 // further down), so this only has to open the door.
 document.getElementById("gamebtn").addEventListener("click", gameChoose);
-document.getElementById("gpclose").addEventListener("click", gameCloseChooser);
+document.getElementById("gpclose").addEventListener("click", gameCancelLobby);
+document.getElementById("gpback").addEventListener("click", gameLobbyBack);
 document.getElementById("updbtn").addEventListener("click", showUpdate);
 
 // The page cannot start a process — no browser lets a file:// document do that,
@@ -5511,7 +5542,7 @@ function gnetReady(then) {
   if (tries.indexOf(local) < 0) tries.push(local);
   (function next(i) {
     if (i >= tries.length) { _gnetBase = ""; gameServerAsk(function () { gnetReady(then); }); return; }
-    fetch(tries[i] + "/whoami")
+    gnetFetch(tries[i] + "/whoami")
       .then(function (r) { return r.json(); })
       .then(function (d) { _gnetBase = tries[i]; GNET.who = d || {}; then(GNET.who); })
       .catch(function () { next(i + 1); });
@@ -5525,35 +5556,59 @@ function gnetAddress() {
   return _gnetBase.replace(/^https?:\/\//, "");
 }
 
+// Where the rooms live. Offline that is the PowerShell classroom server, found
+// by gnetReady and addressed by IP. Served from bekura3d_online it is the site
+// itself, which needs no address because the page came from it and already knows
+// who is playing. Only the three calls below differ; the game protocol above and
+// every screen that uses it are identical either way.
+var NET = window.BEKURA3D_NET || null;
+function netOnline() { return !!NET; }
+
 var GNET = {
   on: false, room: "", me: 0, host: false, onmsg: null, who: null,
   _since: 0, _timer: null, _beat: null,
 
   url: function (p) { return gnetBase() + p; },
-  open: function (room, isHost, cb) {
+  // `seat` is the server's word for who this player is. Offline there is no
+  // server to ask, and the host is seat nought by construction.
+  open: function (room, isHost, cb, seat) {
     this.stop();
     this.on = true; this.room = room; this.host = !!isHost;
-    this.me = isHost ? 0 : 1; this.onmsg = cb; this._since = 0;
+    this.me = (typeof seat === "number") ? seat : (isHost ? 0 : 1);
+    this.onmsg = cb; this._since = 0;
+    // The log is append-only and never pruned, so a connection that started at
+    // zero was handed the whole history of the room. A child refused once could
+    // never knock again — their own refusal was replayed to them the instant
+    // they tried — and a stale acceptance could walk somebody into a game
+    // nobody had let them into. The first answer only says where the end is.
+    this._fresh = true;
     this._poll();
   },
   send: function (msg) {
     if (!this.on) { if (this.onmsg) this.onmsg(msg); return; }   // hot seat: straight back
     msg.from = this.me;
+    // Online the server stamps `from` from the sender's own seat and ignores
+    // what arrives in the body, so a child with the console open cannot play
+    // the other side's moves.
+    if (NET) { NET.send(this.room, msg).catch(function () {}); return; }
     fetch(this.url("/r/" + encodeURIComponent(this.room)),
           { method: "POST", body: JSON.stringify(msg) }).catch(function () {});
   },
   _poll: function () {
     var self = this;
     if (!this.on) return;
-    fetch(this.url("/r/" + encodeURIComponent(this.room) + "?since=" + this._since))
-      .then(function (r) { return r.json(); })
+    (NET ? NET.events(this.room, this._since)
+         : fetch(this.url("/r/" + encodeURIComponent(this.room) + "?since=" + this._since))
+             .then(function (r) { return r.json(); }))
       .then(function (d) {
         self._since = d.n;
+        self.live = true;
+        if (self._fresh) { self._fresh = false; return; }   // catch up, do not replay
         (d.msgs || []).forEach(function (m) {
           if (m.from !== self.me && self.onmsg) self.onmsg(m);
         });
       })
-      .catch(function () {})
+      .catch(function () { self.live = false; })
       .then(function () {
         if (self.on) self._timer = setTimeout(function () { self._poll(); }, 700);
       });
@@ -5561,6 +5616,9 @@ var GNET = {
   // A host says who it is and keeps saying so. A laptop closed mid-game would
   // otherwise sit in the room list for the rest of the afternoon.
   announce: function (name, game) {
+    // Online there is nothing to announce: a room is a row with a seat in it,
+    // and it appears in everyone's list the moment it is created.
+    if (NET) return;
     var self = this;
     function beat() {
       fetch(self.url("/rooms?room=" + encodeURIComponent(self.room)),
@@ -5570,8 +5628,19 @@ var GNET = {
     beat();
     this._beat = setInterval(beat, 8000);
   },
+  // Stop saying the room is open, without closing the connection the game runs
+  // on. A room that has both its players is not an open room.
+  unannounce: function () {
+    if (this._beat) { clearInterval(this._beat); this._beat = null; }
+    // A full room leaves the list on the server the moment its second seat is
+    // taken, so there is nothing for the client to withdraw.
+    if (NET) return;
+    if (this.room) fetch(this.url("/rooms?room=" + encodeURIComponent(this.room) + "&close=1"),
+                         { method: "POST", body: "{}" }).catch(function () {});
+  },
   rooms: function () {
-    return fetch(this.url("/rooms")).then(function (r) { return r.json(); })
+    if (NET) return NET.rooms();
+    return gnetFetch(this.url("/rooms")).then(function (r) { return r.json(); })
       .then(function (d) { return d.rooms || []; })
       .catch(function () { return null; });        // null means "could not ask"
   },
@@ -5736,6 +5805,8 @@ function gameFinish() {
   document.getElementById("hint").innerHTML = "დამთხვევა <b>" + G.score + "%</b> — " +
     (G.score >= GAMEWIN ? "მოგებული." : "ზღვარი " + GAMEWIN + "%-ია.");
   if (GNET.on) GNET.send({ t: "score", score: G.score });   // the builder wants to know
+  // The copier is the one being tested, so the threshold is theirs to clear.
+  gameRecord(G.score, G.score >= GAMEWIN ? "win" : "lose");
   schRenderPanel();
 }
 // Both sides start a fresh round together, so nobody is left building against a
@@ -5788,6 +5859,16 @@ function gameReset() {
 // The chooser, and behind it the lobby. All three screens share the one overlay
 // so a student never loses the thread: pick a game, then say whether the other
 // player is at this keyboard or on another laptop.
+// Every lobby screen belongs to a generation. A lookup that was still in the air
+// when the child pressed გაუქმება used to come back and paint its screen over
+// whatever they had moved on to — reopening a lobby they had closed, or a room
+// they had cancelled. gpAlive() is how a late callback asks whether it still has
+// the floor.
+var _gpGen = 0;
+function gpNewGen() { return ++_gpGen; }
+function gpAlive(g) {
+  return g === _gpGen && document.getElementById("gpwrap").classList.contains("on");
+}
 function gpScreen(head, sub, html, nameOn) {
   document.getElementById("gphead").textContent = head;
   document.getElementById("gpsub").innerHTML = sub;
@@ -5795,6 +5876,8 @@ function gpScreen(head, sub, html, nameOn) {
   var n = document.getElementById("gpname");
   n.style.display = nameOn ? "" : "none";
   if (nameOn && !n.value) { try { n.value = localStorage.getItem("bekura3d-who") || ""; } catch (e) {} }
+  // უკან on every screen but the first one, which has nowhere to go back to
+  document.getElementById("gpback").style.display = (head === "ᲗᲐᲛᲐᲨᲘ") ? "none" : "";
   document.getElementById("gpwrap").classList.add("on");
 }
 function gpWho() {
@@ -5807,47 +5890,160 @@ function gpWire(sel, fn) {
     b.onclick = function () { fn(b); };
   });
 }
+// A button that refuses to work has to say why. Three of them used to answer an
+// empty name field by putting a caret in it and nothing else, which on a dark
+// overlay is invisible — and the very first press on a new laptop is always the
+// empty-name one, because there is no name saved yet.
+function gpNeedName(msg) {
+  var n = document.getElementById("gpname");
+  if ((n.value || "").trim()) return false;
+  document.getElementById("gpsub").innerHTML =
+    '<b style="color:var(--cyan)">' + (msg || "ჯერ დაწერე შენი სახელი.") + '</b>';
+  n.focus();
+  return true;
+}
+// Every request to the classroom server, with a deadline. Without one a laptop
+// whose firewall silently drops packets sits on "ვცდილობ…" for a minute with
+// nothing on screen, which is indistinguishable from the program being broken.
+function gnetFetch(url, opts) {
+  var o = opts || {};
+  if (typeof AbortController === "function") {
+    var ac = new AbortController();
+    o.signal = ac.signal;
+    setTimeout(function () { try { ac.abort(); } catch (e) {} }, 4000);
+  }
+  return fetch(url, o);
+}
 
+// The first screen. Anyone already hosting is shown at the TOP, by name, with
+// nothing to press but their name — joining used to be a sixth card below five
+// long descriptions, which on a laptop screen put it under the fold, where it
+// might as well not have existed. The rooms are looked for the moment this
+// opens, so a student who is meant to join sees who to join before they have
+// read anything.
 function gameChoose() {
-  var h = "";
-  for (var k in GAMEDEF) if (GAMEDEF.hasOwnProperty(k))
-    h += '<button data-gm="' + k + '"><b>' + GAMEDEF[k].ka + '</b><span>' +
-         GAMEDEF[k].long + '</span></button>';
-  h += '<button data-join="1"><b>სხვას შემოუერთდი</b><span>' +
-       'თუ ვინმემ უკვე გახსნა ოთახი — ნახე სია და აირჩიე, ვისთან ითამაშო. ' +
-       'თამაშს მასპინძელი ირჩევს.</span></button>';
-  gpScreen("ᲗᲐᲛᲐᲨᲘ",
-    "ცალკე სამყარო — შენი გეგმები აქ არ ჩანს და აქ აშენებული იქ არ გადავა. " +
-    "ყველა თამაში ნამდვილი ხელსაწყოებით თამაშდება.", h, false);
+  gameChooseDraw([]);
   gpWire("[data-gm]", function (b) { gameMode(b.dataset.gm); });
   gpWire("[data-join]", function () { gameBrowse(); });
+  // and again as soon as the server answers, if it does at all
+  if (SC.game.lobbyTick) clearInterval(SC.game.lobbyTick);
+  var look = function () {
+    var wrap = document.getElementById("gpwrap");
+    if (!wrap.classList.contains("on") || document.getElementById("gphead").textContent !== "ᲗᲐᲛᲐᲨᲘ") {
+      clearInterval(SC.game.lobbyTick); SC.game.lobbyTick = null; return;
+    }
+    gnetPeek(function (rooms) {
+      if (document.getElementById("gphead").textContent !== "ᲗᲐᲛᲐᲨᲘ") return;
+      gameChooseDraw(rooms || []);
+      gpWire("[data-gm]", function (b) { gameMode(b.dataset.gm); });
+      gpWire("[data-join]", function () { gameBrowse(); });
+      gpWire("[data-room]", function (b) {
+        var r = (rooms || []).filter(function (q) { return q.room === b.dataset.room; })[0];
+        if (r) gameJoinNamed(r);
+      });
+    });
+  };
+  look();
+  SC.game.lobbyTick = setInterval(look, 3000);
+}
+function gameChooseDraw(rooms) {
+  var h = "";
+  if (rooms.length) {
+    h += '<div class="hdr">ვინმე გელოდება — დააწკაპუნე სახელზე</div>';
+    h += rooms.map(function (r) {
+      return '<button class="live" data-room="' + gesc(r.room) + '"><b>' +
+             gesc(r.info.host) + '-თან შემოერთება</b><span>' +
+             gesc((GAMEDEF[r.info.game] || {}).ka || r.info.game) + '</span></button>';
+    }).join("");
+  } else {
+    // Online there is no other laptop to point at: the room is on the site, and
+    // whoever opened it is a classmate whose name simply appears here.
+    h += '<button data-join="1"><b>სხვას შემოუერთდი</b><span>' +
+         (netOnline() ? 'თუ კლასელმა უკვე გახსნა ოთახი — აქ მის სახელს დაინახავ.'
+                      : 'თუ ვინმემ სხვა ლეპტოპზე უკვე გახსნა ოთახი — აქ ნახავ მის სახელს.') +
+         '</span></button>';
+  }
+  h += '<div class="hdr">ან თვითონ აირჩიე თამაში</div>';
+  for (var k in GAMEDEF) if (GAMEDEF.hasOwnProperty(k))
+    h += '<button data-gm="' + k + '"><b>' + GAMEDEF[k].ka + '</b><span>' +
+         GAMEDEF[k].sub + '</span></button>';
+  gpScreen("ᲗᲐᲛᲐᲨᲘ",
+    "ცალკე სამყარო — შენი გეგმები აქ არ ჩანს და აქ აშენებული იქ არ გადავა.",
+    h, false);
+}
+// A quiet look for open rooms, for the first screen. Never asks for an address
+// and never complains: if there is no server, there is simply nothing to show.
+function gnetPeek(then) {
+  if (NET) { NET.rooms().then(then); return; }
+  var tries = [], saved = "";
+  if (gnetServed()) tries.push(location.origin);
+  try { saved = gnetNormal(localStorage.getItem(GNET_KEY) || ""); } catch (e) {}
+  if (saved && tries.indexOf(saved) < 0) tries.push(saved);
+  var local = "http://localhost:8830";
+  if (tries.indexOf(local) < 0) tries.push(local);
+  (function next(i) {
+    if (i >= tries.length) { then(null); return; }
+    gnetFetch(tries[i] + "/rooms").then(function (r) { return r.json(); })
+      .then(function (d) { _gnetBase = tries[i]; then(d.rooms || []); })
+      .catch(function () { next(i + 1); });
+  })(0);
+}
+// Joining straight off the first screen: the name is all that is still needed.
+function gameJoinNamed(r) {
+  if (NET) return gameJoinOnline(r);
+  gpScreen("ᲨᲔᲛᲝᲔᲠᲗᲔᲑᲐ",
+    gesc(r.info.host) + " · " + gesc((GAMEDEF[r.info.game] || {}).ka || r.info.game) +
+    " — დაწერე შენი სახელი და დააკაკუნე.",
+    '<button data-knock="1"><b>დააკაკუნე</b><span>მასპინძელი დაგრთავს ნებას.' +
+    '</span></button>', true);
+  gpWire("[data-knock]", function () {
+    if (gpNeedName()) return;
+    gameKnock(r);
+  });
 }
 // One game picked; now, who is the other player?
 function gameMode(id) {
+  if (NET) return gameModeOnline(id);
   var h = '<button data-hot="1"><b>ამ კომპიუტერზე</b><span>' +
           'ერთი აშენებს, მერე თაგვს გადასცემს მეორეს. ყოველთვის მუშაობს, ' +
           'არაფრის გაშვება არ სჭირდება.</span></button>' +
           '<button data-host="1"><b>ოთახის გახსნა — სხვა ლეპტოპებისთვის</b><span>' +
           'ჯერ ამ ლეპტოპზე გაუშვი <b>თამაშის-სერვერი</b>, მერე დააჭირე აქ. ' +
-          'მისამართს, რომელიც გაჩვენებ, სხვები აკრეფენ.</span></button>';
+          'მისამართს, რომელიც გაჩვენებ, სხვები აკრეფენ.</span></button>' +
+          '<button data-join="1"><b>სხვას შემოუერთდი</b><span>' +
+          'თუ სინამდვილეში სხვა უკვე ელოდება — თამაშს ის ირჩევს.</span></button>';
   gpScreen(GAMEDEF[id].ka.toUpperCase(),
     "აირჩიე, სად არის მეორე მოთამაშე. სახელი მხოლოდ ქსელისთვის სჭირდება.",
     h, true);
   gpWire("[data-hot]", function () { GNET.stop(); gameEnter(id); });
   gpWire("[data-host]", function () { gameHost(id); });
+  gpWire("[data-join]", function () { gameBrowse(); });
 }
 function gameHost(id) {
+  if (gpNeedName("ჯერ დაწერე შენი სახელი — სხვები ამ სახელს დაინახავენ.")) return;
   var who = gpWho();
-  if (!who) { document.getElementById("gpname").focus(); return; }
   gpScreen("ᲝᲗᲐᲮᲘ", "სერვერს ვეძებ…", "", false);
+  var gen = gpNewGen();
   gnetReady(function () {
+    if (!gpAlive(gen)) return;        // the child cancelled while we were looking
     var room = "r" + (Date.now() % 1e7) + Math.floor(Math.random() * 900 + 100);
     SC.game.netName = who; SC.game.netGame = id; SC.game.pending = [];
     SC.game.joined = false;
     GNET.open(room, true, function (m) {
-      if (m.t !== "join/req" || SC.game.joined) return;
-      if (SC.game.pending.indexOf(m.name) >= 0) return;
-      SC.game.pending.push(m.name);
+      if (SC.game.joined) return;
+      // A child who backs out withdraws their knock, or the host is left with a
+      // request they can accept and then plays the round alone.
+      if (m.t === "join/off") {
+        SC.game.pending = SC.game.pending.filter(function (q) { return q.who !== m.who; });
+        gameHostPaint(id);
+        return;
+      }
+      if (m.t !== "join/req" || !m.who) return;
+      // Keyed on a token, not on the name. A class has three children called
+      // გიორგი, and matching by name collapsed them into one row and then let
+      // BOTH of them in on a single დაშვება.
+      if (SC.game.pending.some(function (q) { return q.who === m.who; })) return;
+      SC.game.pending.push({ who: m.who, name: m.name });
       gameHostPaint(id);
     });
     GNET.announce(who, id);
@@ -5861,8 +6057,8 @@ function gameHostPaint(id) {
         'სხვებმა უნდა აირჩიონ <b>ფაილი ▸ თამაში ▸ სხვას შემოუერთდი</b> და სიაში ' +
         'შენი სახელი დაინახონ.</span></button>';
   } else {
-    h = p.map(function (n, i) {
-      return '<div class="req"><span class="nm"><b>' + gesc(n) +
+    h = p.map(function (q, i) {
+      return '<div class="req"><span class="nm"><b>' + gesc(q.name) +
              '</b> ითხოვს შემოერთებას</span>' +
              '<button class="yes" data-ok="' + i + '">დაშვება</button>' +
              '<button data-no="' + i + '">უარი</button></div>';
@@ -5882,20 +6078,33 @@ function gameHostPaint(id) {
   gpScreen("ᲝᲗᲐᲮᲘ ᲒᲐᲮᲡᲜᲘᲚᲘᲐ",
            gesc(SC.game.netName) + " · " + GAMEDEF[id].ka + "<br>" + note, h, false);
   gpWire("[data-ok]", function (b) {
-    var n = SC.game.pending[+b.dataset.ok];
+    var q = SC.game.pending[+b.dataset.ok];
+    if (!q) return;
     SC.game.joined = true;
-    GNET.send({ t: "join/ok", to: n, game: id });
+    GNET.send({ t: "join/ok", who: q.who, game: id });
+    // A full room stops advertising itself, and everyone else waiting is told
+    // so. Both used to be missed: the name stayed in every other laptop's list
+    // for the whole game, and anyone who tapped it waited for an answer the
+    // host had stopped listening for.
+    GNET.unannounce();
+    SC.game.pending.forEach(function (other) {
+      if (other.who !== q.who) GNET.send({ t: "join/no", who: other.who, full: 1 });
+    });
+    SC.game.pending = [];
     gameEnter(id);
   });
   gpWire("[data-no]", function (b) {
-    var n = SC.game.pending.splice(+b.dataset.no, 1)[0];
-    GNET.send({ t: "join/no", to: n });
+    var q = SC.game.pending.splice(+b.dataset.no, 1)[0];
+    if (q) GNET.send({ t: "join/no", who: q.who });
     gameHostPaint(id);
   });
 }
 function gameBrowse() {
+  if (NET) return gameBrowseOnline();
   gpScreen("ᲦᲘᲐ ᲝᲗᲐᲮᲔᲑᲘ", "სერვერს ვეძებ…", "", false);
+  var gen = gpNewGen();
   gnetReady(function () {
+    if (!gpAlive(gen)) return;
     gpScreen("ᲦᲘᲐ ᲝᲗᲐᲮᲔᲑᲘ",
              "აირჩიე, ვის შემოუერთდე. თამაშს მასპინძელი ირჩევს — " +
              "შენ მხოლოდ სახელზე აწკაპუნებ.",
@@ -5911,9 +6120,15 @@ function gameBrowse() {
               'შეამოწმე, ისევ გაშვებულია თუ არა <b>თამაშის-სერვერი</b>. ' +
               'დააწკაპუნე მისამართის შესაცვლელად.</span></button>';
         } else if (!rs.length) {
+          // With a route to the address form. A laptop that happens to run its
+          // own server answers instantly and empty, and there was then no way
+          // left to reach the trainer's one — the form could only be got at by
+          // failing to find any server at all.
           h = '<button disabled style="opacity:.6;cursor:default"><b>ჯერ არავინ</b><span>' +
               'ღია ოთახი ჯერ არ არის — მასპინძელმა უნდა აირჩიოს თამაში და ' +
-              '<b>ოთახის გახსნა</b>. სია თავისით განახლდება.</span></button>';
+              '<b>ოთახის გახსნა</b>. სია თავისით განახლდება.</span></button>' +
+              '<button data-srv="1"><b>სხვა მისამართი</b><span>თუ მასპინძელი სხვა ' +
+              'ლეპტოპზეა, აკრიფე მისი მისამართი.</span></button>';
         } else {
           h = rs.map(function (r) {
             return '<button data-room="' + gesc(r.room) + '"><b>' + gesc(r.info.host) +
@@ -5935,26 +6150,176 @@ function gameBrowse() {
   });
 }
 function gameKnock(r) {
+  if (gpNeedName()) return;
   var who = gpWho();
-  if (!who) { document.getElementById("gpname").focus(); return; }
   if (SC.game.browseTick) { clearInterval(SC.game.browseTick); SC.game.browseTick = null; }
   var id = r.info.game;
+  // A token for this knock, so the host can tell two children of the same name
+  // apart — a class has three called გიორგი — and so backing out withdraws the
+  // right one.
+  var tok = "k" + Math.floor(Math.random() * 1e9).toString(36) +
+            (Date.now() % 100000).toString(36);
+  SC.game.knockTok = tok;
   GNET.open(r.room, false, function (m) {
-    if (m.t === "join/ok" && m.to === who) { gameEnter(m.game || id); }
-    else if (m.t === "join/no" && m.to === who) {
-      gpScreen("ᲣᲐᲠᲘ", "სცადე სხვა ოთახი.", "", false);
-      setTimeout(gameBrowse, 1400);
+    if (m.t === "join/ok" && m.who === tok) { gameEnter(m.game || id); return; }
+    // Somebody else got in first. Every waiting child hears this, and without it
+    // they all sat on "ველოდები ნებართვას" for the rest of the lesson.
+    if (m.t === "join/ok" || (m.t === "join/no" && m.who === tok && m.full)) {
+      GNET.stop();
+      gpScreen("ᲝᲗᲐᲮᲘ ᲓᲐᲙᲐᲕᲔᲑᲣᲚᲘᲐ",
+               "მასპინძელმა სხვა შემოუშვა — თამაში ორისთვისაა. აირჩიე სხვა ოთახი " +
+               "ან თვითონ გახსენი.",
+               '<button data-again="1"><b>სხვა ოთახები</b><span>ნახე, ვინ სხვა ელოდება.' +
+               '</span></button>', false);
+      gpWire("[data-again]", function () { gameBrowse(); });
+      return;
+    }
+    if (m.t === "join/no" && m.who === tok) {
+      GNET.stop();
+      gpScreen("ᲣᲐᲠᲘ", "მასპინძელმა უარი გითხრა. სცადე სხვა ოთახი.",
+               '<button data-again="1"><b>სხვა ოთახები</b><span>სია ისევ ღიაა.' +
+               '</span></button>', false);
+      gpWire("[data-again]", function () { gameBrowse(); });
     }
   });
-  GNET.send({ t: "join/req", name: who });
+  GNET.send({ t: "join/req", name: who, who: tok });
   gpScreen("ᲘᲗᲮᲝᲕ ᲨᲔᲛᲝᲔᲠᲗᲔᲑᲐᲡ",
            gesc(r.info.host) + " — დააკაკუნე, ელოდები პასუხს…",
            '<button disabled style="opacity:.6;cursor:default"><b>ველოდები ნებართვას</b>' +
            '<span>მასპინძელმა უნდა დაგრთოს ნება.</span></button>', false);
 }
+// ---------------------------------------------------------- the online lobby
+// Everything below replaces the LAN lobby when the page is served by
+// bekura3d_online, and none of it exists offline.
+//
+// What goes away is the whole apparatus that existed only because there was no
+// server: finding one, typing its address, choosing a name, knocking on a room
+// and waiting for the host to allow it. An account is already proof of who is
+// knocking, so a room fills the moment somebody taps a classmate's name.
+function gameLobbyFail(head, msg, retry) {
+  gpScreen(head, gesc(msg),
+    '<button data-again="1"><b>თავიდან ვცადოთ</b></button>' +
+    '<button data-list="1"><b>სხვა ოთახები</b></button>', false);
+  gpWire("[data-again]", retry);
+  gpWire("[data-list]", function () { gameChoose(); });
+}
+function gameModeOnline(id) {
+  var h = '<button data-hot="1"><b>ამ კომპიუტერზე</b><span>' +
+          'ერთი აშენებს, მერე თაგვს გადასცემს მეორეს — ორივე ერთ ეკრანთან.' +
+          '</span></button>' +
+          '<button data-open="1"><b>კლასელთან</b><span>' +
+          'ოთახს გავხსნი და შენს სახელს კლასელები მაშინვე დაინახავენ სიაში.' +
+          '</span></button>';
+  gpScreen(GAMEDEF[id].ka.toUpperCase(), GAMEDEF[id].long, h, false);
+  gpWire("[data-hot]", function () { GNET.stop(); gameEnter(id); });
+  gpWire("[data-open]", function () { gameOpenOnline(id); });
+}
+function gameOpenOnline(id) {
+  var g = gpNewGen();
+  gpScreen("ᲝᲗᲐᲮᲘ", "ვხსნი…", "", false);
+  NET.create(id).then(function (r) {
+    // The child pressed გაუქმება while this was in the air. Take the room back
+    // down rather than leaving a name in everyone's list that answers nothing.
+    if (!gpAlive(g)) { NET.leave(r.room); return; }
+    SC.game.netRoom = r.room;
+    GNET.open(r.room, true, gameNetMsg, 0);
+    gameWaitRoom(id, r.room, g);
+  }).catch(function (e) {
+    if (gpAlive(g)) gameLobbyFail("ᲕᲔᲠ ᲒᲐᲕᲮᲡᲔᲜᲘ", e.message || "სერვერი არ პასუხობს.",
+                                  function () { gameOpenOnline(id); });
+  });
+}
+// The host's screen while the seat beside them is still empty. The room is
+// already in every classmate's list; the code is for reading out loud when it is
+// quicker to say than to find.
+function gameWaitRoom(id, code, g) {
+  gpScreen("ᲝᲗᲐᲮᲘ ᲒᲐᲮᲡᲜᲘᲚᲘᲐ",
+    gesc(GAMEDEF[id].ka) + ' · კოდი <b style="font-size:20px;letter-spacing:2px">' +
+    gesc(code) + '</b>',
+    '<button disabled style="opacity:.6;cursor:default"><b>ველოდები კლასელს</b><span>' +
+    'შენი სახელი უკვე ჩანს მათ სიაში — <b>ფაილი ▸ თამაში</b>. ' +
+    'როგორც კი ვინმე შემოვა, თამაში თვითონ დაიწყება.</span></button>', false);
+
+  if (SC.game.lobbyTick) clearInterval(SC.game.lobbyTick);
+  SC.game.lobbyTick = setInterval(function () {
+    if (!gpAlive(g)) { clearInterval(SC.game.lobbyTick); SC.game.lobbyTick = null; return; }
+    NET.show(code).then(function (d) {
+      if (!gpAlive(g)) return;
+      if ((d.players || []).length >= 2) {
+        clearInterval(SC.game.lobbyTick); SC.game.lobbyTick = null;
+        gameEnter(id);
+      }
+    }).catch(function () { /* one missed poll is not a lost room */ });
+  }, 1500);
+}
+function gameJoinOnline(r) {
+  var g = gpNewGen();
+  gpScreen("ᲨᲔᲛᲝᲔᲠᲗᲔᲑᲐ", "ვუერთდები " + gesc(r.info.host) + "-ს…", "", false);
+  NET.join(r.room).then(function (d) {
+    if (!gpAlive(g)) { NET.leave(r.room); return; }
+    SC.game.netRoom = d.room;
+    // The seat comes from the server, which decided it under a lock. Two
+    // children tapping the same name at the same instant cannot both be second.
+    GNET.open(d.room, d.seat === 0, gameNetMsg, d.seat);
+    gameEnter(d.game || r.info.game);
+  }).catch(function (e) {
+    if (!gpAlive(g)) return;
+    if (e.status === 409) {
+      gpScreen("ᲝᲗᲐᲮᲘ ᲨᲔᲘᲕᲡᲝ", "სხვამ დაასწრო. აირჩიე სხვა ოთახი ან თვითონ გახსენი.",
+               '<button data-list="1"><b>სხვა ოთახები</b></button>', false);
+      gpWire("[data-list]", function () { gameChoose(); });
+      return;
+    }
+    gameLobbyFail("ᲕᲔᲠ ᲨᲔᲕᲣᲔᲠᲗᲓᲘ", e.message || "სერვერი არ პასუხობს.",
+                  function () { gameJoinOnline(r); });
+  });
+}
+function gameBrowseOnline() {
+  var g = gpNewGen();
+  gpScreen("ᲦᲘᲐ ᲝᲗᲐᲮᲔᲑᲘ", "აირჩიე, ვის შემოუერთდე.",
+           '<button disabled style="opacity:.6;cursor:default"><b>ვეძებ…</b></button>', false);
+  var draw = function () {
+    if (!gpAlive(g)) { clearInterval(SC.game.browseTick); SC.game.browseTick = null; return; }
+    NET.rooms().then(function (rs) {
+      if (!gpAlive(g)) return;
+      var h;
+      if (!rs || !rs.length) {
+        h = '<button disabled style="opacity:.6;cursor:default"><b>ჯერ არავინ</b><span>' +
+            'ღია ოთახი ჯერ არ არის. შენ თვითონ გახსენი — აირჩიე თამაში და ' +
+            '<b>კლასელთან</b>.</span></button>';
+      } else {
+        h = rs.map(function (r) {
+          return '<button class="live" data-room="' + gesc(r.room) + '"><b>' +
+                 gesc(r.info.host) + '</b><span>' +
+                 gesc((GAMEDEF[r.info.game] || {}).ka || r.info.game) + '</span></button>';
+        }).join("");
+      }
+      document.getElementById("gplist").innerHTML = h;
+      gpWire("[data-room]", function (b) {
+        var r = (rs || []).filter(function (q) { return q.room === b.dataset.room; })[0];
+        if (r) gameJoinOnline(r);
+      });
+    });
+  };
+  draw();
+  if (SC.game.browseTick) clearInterval(SC.game.browseTick);
+  SC.game.browseTick = setInterval(draw, 3000);
+}
+// What the trainer sees afterwards on a child's page. Best effort on purpose: a
+// result that fails to record must never interrupt the game that produced it.
+function gameRecord(score, result) {
+  if (!NET || !SC.game.netRoom) return;
+  NET.result(SC.game.netRoom, { score: score, result: result }).catch(function () {});
+}
+
 // Only reached when nothing answered on its own: the joiner is on a different
 // laptop from the server, so it has to be named once. Remembered afterwards.
 function gameServerAsk(then) {
+  // Nothing may repaint under a child who is typing an address: the room-list
+  // poller used to still be running here and rebuilt the form every three
+  // seconds, clearing the field mid-IP.
+  if (SC.game.browseTick) { clearInterval(SC.game.browseTick); SC.game.browseTick = null; }
+  if (SC.game.lobbyTick) { clearInterval(SC.game.lobbyTick); SC.game.lobbyTick = null; }
   gpScreen("ᲡᲔᲠᲕᲔᲠᲘ ᲕᲔᲠ ᲕᲘᲞᲝᲕᲔ",
     "აკრიფე მისამართი, რომელიც მასპინძლის ეკრანზე წერია — " +
     "მაგალითად <b>192.168.1.20</b>.<br>" +
@@ -5969,12 +6334,53 @@ function gameServerAsk(then) {
     if (!typed.trim()) { n.focus(); return; }
     gnetRemember(typed);
     n.value = ""; n.placeholder = "შენი სახელი";
+    // Say that something is happening. Pressing this used to leave the same
+    // screen, the same button and an emptied field on view for as long as the
+    // lookup took, which reads exactly like a button that does not work.
+    gpScreen("ᲕᲔᲫᲔᲑ ᲡᲔᲠᲕᲔᲠᲡ",
+             "ვცდილობ <b>" + gesc(gnetNormal(typed).replace(/^https?:\/\//, "")) + "</b>…",
+             "", false);
     then();
   });
 }
 function gameCloseChooser() {
   document.getElementById("gpwrap").classList.remove("on");
   if (SC.game.browseTick) { clearInterval(SC.game.browseTick); SC.game.browseTick = null; }
+  if (SC.game.lobbyTick) { clearInterval(SC.game.lobbyTick); SC.game.lobbyTick = null; }
+}
+// The გაუქმება button. Backing out of a room that never started has to take the
+// room down with it, or the host goes on announcing an empty one and everybody
+// else sees a name that answers nothing.
+function gameCancelLobby() {
+  gpNewGen();                        // anything still in the air loses the floor
+  if (GNET.on && !SC.game.on) {
+    // Take back whatever this laptop was offering or asking for, so nobody is
+    // left looking at a room that is gone or a request nobody is behind.
+    if (NET && SC.game.netRoom) { NET.leave(SC.game.netRoom); SC.game.netRoom = null; }
+    else if (GNET.host) GNET.unannounce();
+    else if (SC.game.knockTok) GNET.send({ t: "join/off", who: SC.game.knockTok });
+    SC.game.knockTok = null;
+    GNET.stop();
+  }
+  gameCloseChooser();
+}
+// ...and a way back to the first screen from anywhere in the lobby, for the same
+// reason: a host who opened the wrong game had no way out but the whole overlay.
+function gameLobbyBack() {
+  gpNewGen();                        // anything still in the air loses the floor
+  if (GNET.on && !SC.game.on) {
+    // Take back whatever this laptop was offering or asking for, so nobody is
+    // left looking at a room that is gone or a request nobody is behind.
+    if (NET && SC.game.netRoom) { NET.leave(SC.game.netRoom); SC.game.netRoom = null; }
+    else if (GNET.host) GNET.unannounce();
+    else if (SC.game.knockTok) GNET.send({ t: "join/off", who: SC.game.knockTok });
+    SC.game.knockTok = null;
+    GNET.stop();
+  }
+  if (SC.game.browseTick) { clearInterval(SC.game.browseTick); SC.game.browseTick = null; }
+  var n = document.getElementById("gpname");
+  n.value = ""; n.placeholder = "შენი სახელი";
+  gameChoose();
 }
 
 function gameEnter(id) {
@@ -6060,6 +6466,9 @@ function gameNetMsg(m) {
     gameClock(0);
     document.getElementById("hint").innerHTML = "დამთხვევა <b>" + G.score + "%</b> — " +
       (G.score >= GAMEWIN ? "მოგებული." : "ზღვარი " + GAMEWIN + "%-ია.");
+    // Mirrored: this is the builder's copy of the same round, and a rebuild that
+    // cleared the threshold is a point to the other side.
+    gameRecord(m.score, m.score >= GAMEWIN ? "lose" : "win");
     schRenderPanel();
     return;
   }
@@ -6083,6 +6492,7 @@ function gameNetMsg(m) {
 function gameExit() {
   gameClock(0);
   if (GNET.on) { GNET.send({ t: "bye" }); GNET.stop(); }
+  if (NET && SC.game.netRoom) { NET.leave(SC.game.netRoom); SC.game.netRoom = null; }
   SC.game.on = false;
   SC.game.target = null; SC.game.shots = null; SC.game.score = null;
   var back = SC.game.backTab || "basic";
@@ -6618,6 +7028,13 @@ function decoyReveal(i) {
   document.getElementById("hint").innerHTML = (i === G.humanAt)
     ? "<b>გამოიცანი.</b> მწვანე იყო ახლა აშენებული."
     : "<b>ვერ გამოიცანი.</b> მწვანე იყო ახლა აშენებული.";
+  // Adversarial, as the brief says: the guesser wins by finding the human piece
+  // and the builder by hiding it. Both laptops run this, each recording its own
+  // side. Only the guesser has a percentage — the builder's result is the whole
+  // of their score.
+  var guessed = (i === G.humanAt);
+  gameRecord(gnetMe() === 1 ? G.score : null,
+             (guessed === (gnetMe() === 1)) ? "win" : "lose");
   schRenderPanel();
 }
 
@@ -6875,6 +7292,10 @@ function sunPlay(x, z, h, p, fromNet) {
   if (G.left[0] <= 0 && G.left[1] <= 0) {
     G.done = true;
     G.sun = [sunScore(0), sunScore(1)];
+    // Whichever garden kept more sun. The percentage IS the score here, so it is
+    // worth keeping: it says how close the day was, not merely who won it.
+    var me = gnetMe(), mine = G.sun[me], theirs = G.sun[1 - me];
+    gameRecord(mine, mine > theirs ? "win" : (mine < theirs ? "lose" : "draw"));
   }
   sunBuild();
   sunHint();
@@ -10765,6 +11186,19 @@ function adoptSeed() {
       SC.docs = seed.docs;
       docFor("school"); docFor("basic"); docFor("scan");
       SC.activeDoc = seed.active || "school";
+      Object.keys(SC.docs).forEach(function (k) {
+        SC.docs[k].legend = legendMigrate(SC.docs[k].legend);
+      });
+      // The same re-pointing schLoad does, and for the same reason. Setting
+      // SC.docs alone leaves SC.data and SC.flat on the empty document the boot
+      // started from: the seeded plan does not merely fail to appear, the first
+      // flushDoc writes the empty live document straight back over it. Offline
+      // this path only runs for a carried-in data file; online it is how every
+      // session opens.
+      var d = docFor(SC.activeDoc);
+      SC.data = d.data; SC.legend = d.legend; SC.planName = d.planName;
+      SC.flat = d.flat || (d.flat = { A: [], B: [] });
+      SC.nextId = d.nextId; SC.variant = d.variant;
       if (seed.planName) SC.planName = seed.planName;
       if (seed.snap) SC.snap = seed.snap;
       if (seed.light) SC.light = seed.light;
@@ -10821,6 +11255,13 @@ function schImportFile(f) {
         rebuild(); renderLegend(); save();
       }
       schRebuild(); schSave(); schRenderPanel();
+      // Online: a file opened here is almost always work made in the offline
+      // version, arriving on a memory stick. It goes to the child's account
+      // straight away rather than at the next autosave tick, because they may
+      // close the tab the moment they see it back on screen. Absent offline.
+      if (window.BEKURA3D_SYNC && window.BEKURA3D_SYNC.imported) {
+        window.BEKURA3D_SYNC.imported();
+      }
     } catch (e) {
       alert("ფაილი ვერ წაიკითხა: " + e.message);
     }
@@ -12065,6 +12506,48 @@ if (/[?&]selftest=1/.test(location.search)) {
   schGroupRotate(schSelIds(), "z", Math.PI / 2, schSelPivot());
   want("a studio group turn swings one onto the other's line",
        Math.abs(q1.pos[0] - 10) < 0.001 ? "yes" : "no", "yes");
+
+  // Turning a set has to move it as ONE SOLID PIECE, so every distance inside it
+  // survives. The assertion above did not catch that it did not: both shapes
+  // there are plain boxes with the same offset between pos and their middle, so
+  // both were carried wrong by exactly the same amount and stayed the right
+  // distance apart. A shape whose origin is NOT at its middle — a boolean keeps
+  // pos at zero with the geometry out in world coordinates — flew away from the
+  // others instead. These three have three different offsets on purpose.
+  function _wc(s) {                                   // where a shape really is
+    var n = s.V.length || 1, x = 0, y = 0, z = 0;
+    s.V.forEach(function (v) { x += v[0]; y += v[1]; z += v[2]; });
+    return [x / n + s.pos[0], y / n + s.pos[1], z / n + s.pos[2]];
+  }
+  function _gap(a, b) {
+    var p = _wc(a), q = _wc(b);
+    return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+  }
+  var g1 = { id: -95, kind: "box", pos: [-30, 0, 0], V: pBox(8,6,8).V, F: pBox(8,6,8).F };
+  var g2 = { id: -96, kind: "box", pos: [30, 0, 0], V: pBox(8,6,8).V, F: pBox(8,6,8).F };
+  // the awkward one: pos at the origin, geometry fifty metres away
+  var g3 = { id: -97, kind: "box", pos: [0, 0, 0],
+             V: pBox(8,6,8).V.map(function (v) { return [v[0] + 50, v[1], v[2] + 20]; }),
+             F: pBox(8,6,8).F };
+  sbag.push(g1); sbag.push(g2); sbag.push(g3);
+  SC.sel = -95; SC.selMore = [-96, -97];
+  var d12 = _gap(g1, g2), d13 = _gap(g1, g3), d23 = _gap(g2, g3);
+  schGroupRotate(schSelIds(), "y", Math.PI / 3, schSelPivot());
+  want("a turned set keeps the gap between the first two",
+       Math.abs(_gap(g1, g2) - d12) < 0.01 ? "rigid" : "sheared", "rigid");
+  want("and the gap to the odd one out",
+       Math.abs(_gap(g1, g3) - d13) < 0.01 ? "rigid" : "sheared", "rigid");
+  want("and every other gap in the set",
+       Math.abs(_gap(g2, g3) - d23) < 0.01 ? "rigid" : "sheared", "rigid");
+  // Scaling a set is the same promise, one step weaker: every gap grows by k.
+  var e12 = _gap(g1, g2), e13 = _gap(g1, g3);
+  schGroupScale(schSelIds(), "xyz", 2, schSelPivot());
+  want("a scaled set doubles every gap in it",
+       (Math.abs(_gap(g1, g2) - e12 * 2) < 0.02 &&
+        Math.abs(_gap(g1, g3) - e13 * 2) < 0.02) ? "even" : "uneven", "even");
+  for (var gi = sbag.length - 1; gi >= 0; gi--)
+    if (sbag[gi].id === -95 || sbag[gi].id === -96 || sbag[gi].id === -97) sbag.splice(gi, 1);
+  SC.sel = -91; SC.selMore = [-92];
   // ---- the rubber band ---------------------------------------------------
   // Left-dragging over empty ground draws a rectangle and takes what it
   // touches. The test is the geometry of it: which meshes fall inside a screen
@@ -12483,6 +12966,18 @@ if (/[?&]selftest=1/.test(location.search)) {
   }
   state.tab = _tab0;
   flush();
+}
+
+// The online build (bekura3d_online) serves this same file behind a login and
+// keeps each child's work on the server. It needs one thing the offline build
+// does not: a way to read the current state from outside this closure. Handing
+// out fullPayload is enough — the sync layer snapshots on a timer and posts what
+// changed, so nothing in here has to know it is being watched.
+//
+// Absent offline, where window.BEKURA3D_SYNC is undefined and this does nothing.
+if (window.BEKURA3D_SYNC && typeof window.BEKURA3D_SYNC.attach === "function") {
+  try { window.BEKURA3D_SYNC.attach({ fullPayload: fullPayload, nowStamp: nowStamp }); }
+  catch (e) { /* a sync that cannot start must never stop the lesson */ }
 }
 
 })();
