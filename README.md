@@ -772,21 +772,30 @@ second player takes the mouse. **ორიგინალის ჩვენე�
 afterwards so the two can be compared by eye as well as by number. Always works,
 needs nothing.
 
-**Two laptops.** Pick a game, then **ოთახის გახსნა**: type a name and wait. On
-the other laptop, **სხვას შემოუერთდი** shows every open room by its host's name
-and which game it is running; knocking asks, and the host says yes or no. Nobody
-is dropped into a game with a stranger without the host agreeing, and no child
-has to read a room number aloud across a classroom.
+**Two laptops.** Three steps, and only one of them involves typing anything:
 
-The carrier is the same classroom server the standalone page uses — run
-`თამაშის-სერვერი.cmd` on the trainer's laptop. From there, either:
+1. **On one laptop, double-click `თამაშის-სერვერი.cmd`.** It asks Windows for
+   administrator rights and you say yes — without them it can only talk to
+   itself, which looks like a working server right up until a second laptop
+   tries to reach it. Leave the window open.
+2. **On that same laptop:** ფაილი ▸ თამაში ▸ pick a game ▸ **ოთახის გახსნა**,
+   type a name. Nothing else. The screen then shows, in large type, **the
+   address for everyone else** — the server tells the page what it is, so
+   nobody hunts for an IP in a console window.
+3. **On every other laptop:** ფაილი ▸ თამაში ▸ **სხვას შემოუერთდი**. If it asks,
+   type the address from step 2 once — it is remembered from then on. The open
+   rooms appear by their host's name and game; tap one, and the host gets
+   **დაშვება / უარი**.
 
-- **open the planner from the server** — `http://<the trainer's address>:8830/bekura3d.html`
-  — and there is nothing at all to configure, because the page's own origin is
-  the server; or
-- **keep using the copy on the Desktop** and type the server's address once when
-  the lobby asks. It is remembered. The server sends the header that makes a
-  `file://` page allowed to ask.
+Nobody is dropped into a game with a stranger without the host agreeing, and no
+child has to read a room number aloud across a classroom.
+
+The host is never asked for an address: whoever opens a room is running the
+server on their own machine, so the page finds it on `localhost` by itself. Only
+the other laptops are told one. A copy opened straight off the Desktop works the
+same way — the server sends the header that lets a `file://` page ask it — and a
+copy opened *from* the server (`http://<address>:8830/bekura3d.html`) needs no
+address anywhere.
 
 Each game hands over what it should and nothing more: the telephone and the
 shadow plan send the drawings, the duel sends the model for its fifteen seconds,

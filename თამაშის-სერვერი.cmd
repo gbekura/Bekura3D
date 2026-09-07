@@ -14,6 +14,10 @@ REM  Close the window to stop it. Nothing is written to disk.
 REM ---------------------------------------------------------------------------
 setlocal
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0game-server.ps1"
+REM 7 means it asked Windows for administrator rights and a new window has the
+REM server now. Without those rights it can only talk to itself, which is not a
+REM classroom. Nothing to pause for here -- the new window is the one to watch.
+if errorlevel 7 exit /b
 echo.
 pause
 endlocal

@@ -1125,7 +1125,7 @@ var SITERING = null;
 // Which commit this bundle was built from. A pure function of HEAD, never the
 // clock, so rebuilding without a new commit still reproduces the file byte for
 // byte. Null when built outside a checkout.
-var BUILD = {"c":"6db6063","d":"2026-09-06"};
+var BUILD = {"c":"2cdb742","d":"2026-09-07"};
 
 // Working areas that SHIP with the tool, one ring per town, from data/sites.json.
 // A trainer draws the district once with the ტერიტორია tool, the ring is baked
@@ -5493,16 +5493,40 @@ function gnetNormal(s) {
   if (!/:\d+$/.test(s.replace(/^https?:\/\//i, ""))) s += ":8830";
   return s;
 }
-function gnetBase() {
-  if (gnetServed()) return location.origin;
-  try { return gnetNormal(localStorage.getItem(GNET_KEY) || ""); } catch (e) { return ""; }
-}
+var _gnetBase = "";                  // the server this copy has actually reached
+function gnetBase() { return _gnetBase; }
 function gnetRemember(s) {
   try { localStorage.setItem(GNET_KEY, gnetNormal(s)); } catch (e) {}
 }
+// Find the server without making anybody type anything if it can be helped.
+// Whoever opens a room is running the server on their own laptop, so localhost
+// is nearly always right for them; only the other laptops have to be told an
+// address, and only once. `then` is handed what the server says about itself.
+function gnetReady(then) {
+  var tries = [], saved = "";
+  if (gnetServed()) tries.push(location.origin);       // opened from the server itself
+  try { saved = gnetNormal(localStorage.getItem(GNET_KEY) || ""); } catch (e) {}
+  if (saved && tries.indexOf(saved) < 0) tries.push(saved);
+  var local = "http://localhost:8830";
+  if (tries.indexOf(local) < 0) tries.push(local);
+  (function next(i) {
+    if (i >= tries.length) { _gnetBase = ""; gameServerAsk(function () { gnetReady(then); }); return; }
+    fetch(tries[i] + "/whoami")
+      .then(function (r) { return r.json(); })
+      .then(function (d) { _gnetBase = tries[i]; GNET.who = d || {}; then(GNET.who); })
+      .catch(function () { next(i + 1); });
+  })(0);
+}
+// The address to read out to the rest of the room, as the server itself reports
+// it. A trainer should not have to find their own IP.
+function gnetAddress() {
+  var w = GNET.who || {};
+  if (w.addr && w.addr.length) return w.addr[0] + (w.port && w.port !== 80 ? ":" + w.port : "");
+  return _gnetBase.replace(/^https?:\/\//, "");
+}
 
 var GNET = {
-  on: false, room: "", me: 0, host: false, onmsg: null,
+  on: false, room: "", me: 0, host: false, onmsg: null, who: null,
   _since: 0, _timer: null, _beat: null,
 
   url: function (p) { return gnetBase() + p; },
@@ -5783,16 +5807,6 @@ function gpWire(sel, fn) {
     b.onclick = function () { fn(b); };
   });
 }
-// Can this copy reach a classroom server at all, and if not, what to do about it.
-function gpNetNote() {
-  if (gnetServed())
-    return "ქსელი მუშაობს — ეს გვერდი სერვერიდანვეა გახსნილი.";
-  if (gnetBase())
-    return "სერვერი: <b>" + gesc(gnetBase().replace(/^https?:\/\//, "")) + "</b>. " +
-           "შესაცვლელად აკრიფე სხვა მისამართი ქვემოთ.";
-  return "ქსელით სათამაშოდ მასწავლებლის ლეპტოპზე უნდა იყოს გაშვებული " +
-         "<b>თამაშის-სერვერი</b>, და აქ მისი მისამართი უნდა აკრიფო.";
-}
 
 function gameChoose() {
   var h = "";
@@ -5811,37 +5825,41 @@ function gameChoose() {
 // One game picked; now, who is the other player?
 function gameMode(id) {
   var h = '<button data-hot="1"><b>ამ კომპიუტერზე</b><span>' +
-          'ერთი აშენებს, მერე თაგვს გადასცემს მეორეს. ყოველთვის მუშაობს.</span></button>' +
-          '<button data-host="1"><b>ოთახის გახსნა</b><span>' +
-          'შენ ხდები მასპინძელი. მეორე ლეპტოპზე შენს სახელს დაინახავენ სიაში ' +
-          'და დაგიკაკუნებენ.</span></button>';
+          'ერთი აშენებს, მერე თაგვს გადასცემს მეორეს. ყოველთვის მუშაობს, ' +
+          'არაფრის გაშვება არ სჭირდება.</span></button>' +
+          '<button data-host="1"><b>ოთახის გახსნა — სხვა ლეპტოპებისთვის</b><span>' +
+          'ჯერ ამ ლეპტოპზე გაუშვი <b>თამაშის-სერვერი</b>, მერე დააჭირე აქ. ' +
+          'მისამართს, რომელიც გაჩვენებ, სხვები აკრეფენ.</span></button>';
   gpScreen(GAMEDEF[id].ka.toUpperCase(),
-           gpNetNote() + " " + "სახელი მხოლოდ ქსელისთვისაა.", h, true);
+    "აირჩიე, სად არის მეორე მოთამაშე. სახელი მხოლოდ ქსელისთვის სჭირდება.",
+    h, true);
   gpWire("[data-hot]", function () { GNET.stop(); gameEnter(id); });
   gpWire("[data-host]", function () { gameHost(id); });
 }
 function gameHost(id) {
-  if (!gnetBase()) { gameServerAsk(function () { gameHost(id); }); return; }
   var who = gpWho();
   if (!who) { document.getElementById("gpname").focus(); return; }
-  var room = "r" + (Date.now() % 1e7) + Math.floor(Math.random() * 900 + 100);
-  SC.game.netName = who; SC.game.netGame = id; SC.game.pending = [];
-  GNET.open(room, true, function (m) {
-    if (m.t !== "join/req" || SC.game.joined) return;
-    if (SC.game.pending.indexOf(m.name) >= 0) return;
-    SC.game.pending.push(m.name);
+  gpScreen("ᲝᲗᲐᲮᲘ", "სერვერს ვეძებ…", "", false);
+  gnetReady(function () {
+    var room = "r" + (Date.now() % 1e7) + Math.floor(Math.random() * 900 + 100);
+    SC.game.netName = who; SC.game.netGame = id; SC.game.pending = [];
+    SC.game.joined = false;
+    GNET.open(room, true, function (m) {
+      if (m.t !== "join/req" || SC.game.joined) return;
+      if (SC.game.pending.indexOf(m.name) >= 0) return;
+      SC.game.pending.push(m.name);
+      gameHostPaint(id);
+    });
+    GNET.announce(who, id);
     gameHostPaint(id);
   });
-  SC.game.joined = false;
-  GNET.announce(who, id);
-  gameHostPaint(id);
 }
 function gameHostPaint(id) {
   var p = SC.game.pending || [], h;
   if (!p.length) {
     h = '<button disabled style="opacity:.6;cursor:default"><b>ველოდები…</b><span>' +
-        'მეორემ უნდა აირჩიოს <b>სხვას შემოუერთდი</b> და სიაში შენი სახელი დაინახოს.' +
-        '</span></button>';
+        'სხვებმა უნდა აირჩიონ <b>ფაილი ▸ თამაში ▸ სხვას შემოუერთდი</b> და სიაში ' +
+        'შენი სახელი დაინახონ.</span></button>';
   } else {
     h = p.map(function (n, i) {
       return '<div class="req"><span class="nm"><b>' + gesc(n) +
@@ -5850,9 +5868,19 @@ function gameHostPaint(id) {
              '<button data-no="' + i + '">უარი</button></div>';
     }).join("");
   }
+  // The one thing the rest of the room needs, in the one place they can all see
+  // it: the trainer reads it out, nobody hunts for an IP in a console window.
+  var w = GNET.who || {}, note;
+  if (w.wild === false) {
+    note = '<b>ყურადღება:</b> სერვერი მხოლოდ ამ ლეპტოპს ესაუბრება. დახურე ' +
+           'თამაშის-სერვერის ფანჯარა, დააწკაპუნე მასზე მარჯვენა ღილაკით და ' +
+           'აირჩიე „Run as administrator“.';
+  } else {
+    note = 'სხვებმა ეს მისამართი უნდა აკრიფონ:<br><b style="font-size:19px;' +
+           'letter-spacing:.5px">' + gesc(gnetAddress()) + '</b>';
+  }
   gpScreen("ᲝᲗᲐᲮᲘ ᲒᲐᲮᲡᲜᲘᲚᲘᲐ",
-           gesc(SC.game.netName) + " · " + GAMEDEF[id].ka +
-           " — ელოდები, ვინ შემოგიერთდება.", h, false);
+           gesc(SC.game.netName) + " · " + GAMEDEF[id].ka + "<br>" + note, h, false);
   gpWire("[data-ok]", function (b) {
     var n = SC.game.pending[+b.dataset.ok];
     SC.game.joined = true;
@@ -5866,39 +5894,45 @@ function gameHostPaint(id) {
   });
 }
 function gameBrowse() {
-  if (!gnetBase()) { gameServerAsk(gameBrowse); return; }
-  gpScreen("ᲦᲘᲐ ᲝᲗᲐᲮᲔᲑᲘ", gpNetNote(), '<button disabled><b>ვეძებ…</b></button>', true);
-  var draw = function () {
-    if (!document.getElementById("gpwrap").classList.contains("on")) {
-      clearInterval(SC.game.browseTick); SC.game.browseTick = null; return;
-    }
-    GNET.rooms().then(function (rs) {
-      var h;
-      if (rs === null) {
-        h = '<button data-srv="1"><b>სერვერს ვერ მივწვდი</b><span>' +
-            'შეამოწმე, გაშვებულია თუ არა <b>თამაშის-სერვერი</b> და სწორია თუ არა ' +
-            'მისამართი. დააწკაპუნე მისამართის შესაცვლელად.</span></button>';
-      } else if (!rs.length) {
-        h = '<button disabled style="opacity:.6;cursor:default"><b>ჯერ არავინ</b><span>' +
-            'ღია ოთახი ჯერ არ არის. სია თავისით განახლდება.</span></button>';
-      } else {
-        h = rs.map(function (r) {
-          return '<button data-room="' + gesc(r.room) + '"><b>' + gesc(r.info.host) +
-                 '</b><span>' + gesc((GAMEDEF[r.info.game] || {}).ka || r.info.game) +
-                 '</span></button>';
-        }).join("");
+  gpScreen("ᲦᲘᲐ ᲝᲗᲐᲮᲔᲑᲘ", "სერვერს ვეძებ…", "", false);
+  gnetReady(function () {
+    gpScreen("ᲦᲘᲐ ᲝᲗᲐᲮᲔᲑᲘ",
+             "აირჩიე, ვის შემოუერთდე. თამაშს მასპინძელი ირჩევს — " +
+             "შენ მხოლოდ სახელზე აწკაპუნებ.",
+             '<button disabled><b>ვეძებ…</b></button>', true);
+    var draw = function () {
+      if (!document.getElementById("gpwrap").classList.contains("on")) {
+        clearInterval(SC.game.browseTick); SC.game.browseTick = null; return;
       }
-      document.getElementById("gplist").innerHTML = h;
-      gpWire("[data-srv]", function () { gameServerAsk(gameBrowse); });
-      gpWire("[data-room]", function (b) {
-        var r = rs.filter(function (q) { return q.room === b.dataset.room; })[0];
-        if (r) gameKnock(r);
+      GNET.rooms().then(function (rs) {
+        var h;
+        if (rs === null) {
+          h = '<button data-srv="1"><b>სერვერს ვეღარ მივწვდი</b><span>' +
+              'შეამოწმე, ისევ გაშვებულია თუ არა <b>თამაშის-სერვერი</b>. ' +
+              'დააწკაპუნე მისამართის შესაცვლელად.</span></button>';
+        } else if (!rs.length) {
+          h = '<button disabled style="opacity:.6;cursor:default"><b>ჯერ არავინ</b><span>' +
+              'ღია ოთახი ჯერ არ არის — მასპინძელმა უნდა აირჩიოს თამაში და ' +
+              '<b>ოთახის გახსნა</b>. სია თავისით განახლდება.</span></button>';
+        } else {
+          h = rs.map(function (r) {
+            return '<button data-room="' + gesc(r.room) + '"><b>' + gesc(r.info.host) +
+                   '</b><span>' + gesc((GAMEDEF[r.info.game] || {}).ka || r.info.game) +
+                   '</span></button>';
+          }).join("");
+        }
+        document.getElementById("gplist").innerHTML = h;
+        gpWire("[data-srv]", function () { gameServerAsk(gameBrowse); });
+        gpWire("[data-room]", function (b) {
+          var r = rs.filter(function (q) { return q.room === b.dataset.room; })[0];
+          if (r) gameKnock(r);
+        });
       });
-    });
-  };
-  draw();
-  if (SC.game.browseTick) clearInterval(SC.game.browseTick);
-  SC.game.browseTick = setInterval(draw, 3000);
+    };
+    draw();
+    if (SC.game.browseTick) clearInterval(SC.game.browseTick);
+    SC.game.browseTick = setInterval(draw, 3000);
+  });
 }
 function gameKnock(r) {
   var who = gpWho();
@@ -5918,21 +5952,24 @@ function gameKnock(r) {
            '<button disabled style="opacity:.6;cursor:default"><b>ველოდები ნებართვას</b>' +
            '<span>მასპინძელმა უნდა დაგრთოს ნება.</span></button>', false);
 }
-// Only ever reached from a file:// copy: the page has no origin, so the server
-// has to be named once. Remembered afterwards.
+// Only reached when nothing answered on its own: the joiner is on a different
+// laptop from the server, so it has to be named once. Remembered afterwards.
 function gameServerAsk(then) {
-  gpScreen("ᲡᲔᲠᲕᲔᲠᲘᲡ ᲛᲘᲡᲐᲛᲐᲠᲗᲘ",
-    "მასწავლებლის ლეპტოპზე გაშვებული უნდა იყოს <b>თამაშის-სერვერი</b>. " +
-    "აკრიფე მისი მისამართი — მაგალითად <b>192.168.1.20</b>.",
-    '<button data-go="1"><b>დამახსოვრება</b><span>პორტი 8830 თავისით ემატება.' +
+  gpScreen("ᲡᲔᲠᲕᲔᲠᲘ ᲕᲔᲠ ᲕᲘᲞᲝᲕᲔ",
+    "აკრიფე მისამართი, რომელიც მასპინძლის ეკრანზე წერია — " +
+    "მაგალითად <b>192.168.1.20</b>.<br>" +
+    "თუ ჯერ არავის გაუშვია, ერთმა თქვენგანმა უნდა გახსნას <b>თამაშის-სერვერი</b>.",
+    '<button data-go="1"><b>გაგრძელება</b><span>პორტი 8830 თავისით ემატება.' +
     '</span></button>', true);
   var n = document.getElementById("gpname");
   n.placeholder = "192.168.1.20";
   try { n.value = (localStorage.getItem(GNET_KEY) || "").replace(/^https?:\/\//, ""); } catch (e) {}
   gpWire("[data-go]", function () {
-    gnetRemember(n.value);
+    var typed = n.value;
+    if (!typed.trim()) { n.focus(); return; }
+    gnetRemember(typed);
     n.value = ""; n.placeholder = "შენი სახელი";
-    if (gnetBase()) then(); else n.focus();
+    then();
   });
 }
 function gameCloseChooser() {

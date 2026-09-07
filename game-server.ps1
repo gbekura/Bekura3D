@@ -47,6 +47,66 @@ function Esc([string]$s) {
   return $s
 }
 
+# Is one already running? Double-clicking the shortcut twice, or leaving last
+# lesson's window open behind another program, otherwise ends in a raw
+# HttpListenerException and a stack trace -- which is not a thing to hand a
+# trainer in the middle of a class. Checked before asking for administrator
+# rights, so nobody is shown a Windows prompt for a server they already have.
+function Test-PortBusy([int]$p) {
+  try {
+    $c = New-Object System.Net.Sockets.TcpClient
+    $ok = $c.BeginConnect('127.0.0.1', $p, $null, $null).AsyncWaitHandle.WaitOne(400)
+    $c.Close()
+    return $ok
+  } catch { return $false }
+}
+if (Test-PortBusy $port) {
+  # Busy is not the same as "ours". Ask whoever is there who they are before
+  # telling a trainer to go and find a window that may not exist.
+  $mine = $false
+  try {
+    $r = Invoke-WebRequest -Uri "http://localhost:$port/whoami" -UseBasicParsing -TimeoutSec 3
+    $mine = ($r.Content -like '*"wild"*')
+  } catch {}
+  Write-Host ""
+  Write-Host "  Bekura3D game server"
+  Write-Host "  ===================="
+  if ($mine) {
+    Write-Host "  It is ALREADY RUNNING on this laptop -- there is another window"
+    Write-Host "  open somewhere with it in. You do not need a second one."
+    Write-Host ""
+    Write-Host "  Use it as it is:   http://localhost:$port/"
+    Write-Host "  Or close that window first, then start this again."
+  } else {
+    Write-Host "  Port $port on this laptop is taken by some other program, so the"
+    Write-Host "  game server cannot open it."
+    Write-Host ""
+    Write-Host "  Close whatever is using it and start this again. To find out what"
+    Write-Host "  that is, from a console:"
+    Write-Host "      netstat -ano | findstr :$port"
+  }
+  Write-Host ""
+  exit 1
+}
+
+# Reserving http://+:8830/ is an administrator's job on Windows. Without it this
+# listens to itself and nothing else, which looks exactly like a working server
+# right up until the moment a second laptop tries to reach it -- so ask for the
+# rights once, up front, instead of starting a server that cannot do its job.
+# Exit code 7 tells the .cmd that a new elevated window has the console now.
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
+           ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin -and -not $env:BEKURA3D_NOELEVATE) {
+  try {
+    Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList @(
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath) | Out-Null
+    exit 7
+  } catch {
+    # They said no. Carry on -- the listener below falls back to localhost and
+    # the banner explains what that means.
+  }
+}
+
 $listener = New-Object System.Net.HttpListener
 # + rather than localhost: the whole point is that other laptops can reach it.
 # Windows normally wants an admin to reserve a wildcard prefix, so fall back to
@@ -59,7 +119,25 @@ try {
   $wild = $false
   $listener = New-Object System.Net.HttpListener
   $listener.Prefixes.Add("http://localhost:$port/")
-  $listener.Start()
+  # And if even that will not open, say what to do rather than throwing the
+  # exception at whoever is standing in front of the class.
+  try {
+    $listener.Start()
+  } catch {
+    Write-Host ""
+    Write-Host "  Bekura3D game server"
+    Write-Host "  ===================="
+    Write-Host "  Could not open port $port on this laptop."
+    Write-Host ""
+    Write-Host "  Almost always this means something else already has it -- most"
+    Write-Host "  likely another copy of this server in a window you have forgotten."
+    Write-Host "  Close it and start this again."
+    Write-Host ""
+    Write-Host "  Windows said:"
+    Write-Host ("      " + $_.Exception.Message)
+    Write-Host ""
+    exit 1
+  }
 }
 
 $ips = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
@@ -89,8 +167,10 @@ if ($wild -and $ips.Count) {
   Write-Host "      netsh http add urlacl url=http://+:$port/ user=Everyone"
 }
 Write-Host ""
-Write-Host "  In the page: choose the NETWORK mode (third button), the same room"
-Write-Host "  number on every laptop, and ONE of them picks host (first button)."
+Write-Host "  In Bekura3D on every laptop:  FILE > GAME"
+Write-Host "    - one of you picks a game, then OPEN A ROOM, and types a name"
+Write-Host "    - everyone else picks JOIN SOMEONE and taps that name in the list"
+Write-Host "  If a laptop asks for an address, give it the one above."
 Write-Host "  Windows may ask once to allow this through the firewall -- say yes for"
 Write-Host "  a private network."
 Write-Host ""
@@ -109,6 +189,22 @@ while ($listener.IsListening) {
     # ever sent, which needs no preflight -- this one header is the whole of it.
     $res.Headers.Add('Access-Control-Allow-Origin', '*')
     $path = $req.Url.AbsolutePath
+
+    # Who am I, and can anyone else actually reach me? The page asks this the
+    # moment somebody opens a room, so it can show the class the address to type
+    # instead of making a trainer read it off a console window in English.
+    if ($path -eq '/whoami') {
+      $parts = @()
+      foreach ($ip in $ips) { $parts += ('"' + (Esc $ip) + '"') }
+      $res.ContentType = 'application/json; charset=utf-8'
+      $body = '{"port":' + $port + ',"wild":' + $(if ($wild) { 'true' } else { 'false' }) +
+              ',"addr":[' + ($parts -join ',') + ']}'
+      $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+      $res.ContentLength64 = $bytes.Length
+      $res.OutputStream.Write($bytes, 0, $bytes.Length)
+      $res.Close()
+      continue
+    }
 
     # The open-room list. A host announces itself here and keeps saying so; a
     # joiner reads it to see who is waiting and which game they are running. The
