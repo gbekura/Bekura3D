@@ -44,31 +44,62 @@ if (Test-Path -LiteralPath $seed) {
   Write-Host "  Installed: $dest\bekura3d-data.js"
 }
 
+# The games, if this clone has them built. Installed under an ASCII name on
+# purpose: WScript.Shell THROWS outright when a shortcut's TargetPath contains
+# Georgian -- "Value does not fall within the expected range" -- so a .lnk can
+# never point at the Georgian bundle name. The shortcut's own name is still
+# Georgian; only the file it points at is not.
+$gameSrc = Join-Path $src ((-join ([int[]](0x10D7,0x10D0,0x10DB,0x10D0,0x10E8,0x10D8) |
+                                   ForEach-Object { [char]$_ })) + '.html')
+$gameDst = Join-Path $dest 'games.html'
+$haveGame = Test-Path -LiteralPath $gameSrc
+if ($haveGame) {
+  Copy-Item -LiteralPath $gameSrc -Destination $gameDst -Force
+  Write-Host "  Installed: $gameDst"
+}
+
 # The shortcut targets the .html, never a named browser. file:// localStorage is
 # per browser: point this at chrome.exe and the day the default differs, every
 # student's saved work is silently gone.
-$target = Join-Path $dest 'bekura3d.html'
 $sh = New-Object -ComObject WScript.Shell
 
-function New-B3DShortcut($path, $desc) {
+# A Georgian shortcut NAME is fine, but only if the .lnk is created under an
+# ASCII path and renamed afterwards: CreateShortcut takes the path through the
+# system ANSI codepage, which on a Latin-locale laptop turns Georgian into
+# "?????" and then fails, because "?" is illegal in a filename. Move-Item is
+# .NET and Unicode all the way down.
+function New-B3DShortcut($path, $target, $desc) {
   $parent = Split-Path -Parent $path
   if (-not (Test-Path -LiteralPath $parent)) {
     New-Item -ItemType Directory -Path $parent -Force | Out-Null
   }
-  $s = $sh.CreateShortcut($path)
+  $tmp = Join-Path $parent ('b3d-tmp-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.lnk')
+  $s = $sh.CreateShortcut($tmp)
   $s.TargetPath       = $target
   $s.WorkingDirectory = $dest
   $s.Description      = $desc
   $s.Save()
+  if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+  Move-Item -LiteralPath $tmp -Destination $path -Force
   Write-Host "  Shortcut:  $path"
 }
 
+$app = Join-Path $dest 'bekura3d.html'
+$games = -join ([int[]](0x10D7,0x10D0,0x10DB,0x10D0,0x10E8,0x10D4,0x10D1,0x10D8) |
+                ForEach-Object { [char]$_ })          # "თამაშები"
+
 # Public Desktop is merged into every account's desktop by Windows, so one
 # shortcut here appears for all of them, including accounts made later.
-New-B3DShortcut (Join-Path $env:PUBLIC 'Desktop\Bekura3D.lnk') 'Bekura3D'
-
-# and the All Users Start Menu, so it is also reachable by typing the name
-New-B3DShortcut (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Bekura3D.lnk') 'Bekura3D'
+$pubDesk = Join-Path $env:PUBLIC 'Desktop'
+$startMenu = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'
+New-B3DShortcut (Join-Path $pubDesk 'Bekura3D.lnk') $app 'Bekura3D'
+New-B3DShortcut (Join-Path $startMenu 'Bekura3D.lnk') $app 'Bekura3D'
+if ($haveGame) {
+  New-B3DShortcut (Join-Path $pubDesk ($games + '.lnk')) $gameDst 'Bekura3D games'
+  New-B3DShortcut (Join-Path $startMenu ($games + '.lnk')) $gameDst 'Bekura3D games'
+} else {
+  Write-Host "  (no games bundle in this copy - run build-game.sh, or pull a build that has one)"
+}
 
 Write-Host ""
 Write-Host "  Every account on this laptop can now open Bekura3D from the Desktop."

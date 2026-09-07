@@ -109,7 +109,7 @@ To rebuild the ground textures from source (needs internet):
 
     bash data/make-maps.sh
 
-`?selftest=1` runs 218 assertions in the page and prints the results over it. Run it
+`?selftest=1` runs 250 assertions in the page and prints the results over it. Run it
 before shipping a build, and run it on `bekura3d.html` rather than on `app.html`:
 the bundle is what students open, and three of the assertions need the ground
 textures that only the bundle carries inline.
@@ -121,11 +121,29 @@ grid with red X / blue Z axis lines, nothing else. The same modelling tools as �
 practising or building a shape without the site around it.
 
 **სკანი**, a real drone photogrammetry capture of Lisi, imported as an actual triangle mesh:
-**34,110 triangles** carrying the survey's own photo texture. Buildings, roads, cut banks and
+**24,246 triangles** carrying the survey's own photo texture. Buildings, roads, cut banks and
 spoil heaps stand as real geometry, because a photogrammetry capture has vertical faces that a
 height grid physically cannot hold. The site is **861 m** square with **47 m** of fall, in true
 metres. Same tools as ქალაქი, zones, paths, areas in m², just standing on a surveyed
 site instead of an OpenStreetMap one.
+
+**Editing the capture itself (ᲡᲙᲐᲜᲘᲡ ᲠᲔᲓᲐᲥᲢᲘᲠᲔᲑᲐ).** სკანი is the one tab whose ground is
+captured rather than drawn, so it is the one place a team has to clear something away — a spoil
+heap, a shed, whatever stands where the plan goes. A **წაშლის რეჟიმი** button in the right panel
+turns the left button into an eraser: click or drag across the survey and triangles come out.
+Dragging keeps cutting, because taking a spoil heap off a capture one triangle per click is not
+a thing anyone would finish.
+
+**The original is never touched.** What is stored is a list of which triangles were cut, not a
+new mesh — the capture's own index buffer is kept whole and a filtered copy is what gets drawn.
+So **საწყისის დაბრუნება** is emptying an array, the panel always says how many are gone, the cut
+saves and loads with the document, and <kbd>Ctrl</kbd>+<kbd>Z</kbd> puts back a whole eraser
+stroke rather than one triangle (the stroke commits once, when you let go, so a drag across four
+hundred triangles does not fill the undo history with itself).
+
+The button is only on სკანი, and it only exists while the mode is on — the eraser takes the
+plain left button, so <kbd>Shift</kbd> and <kbd>Ctrl</kbd> are deliberately left alone and the
+camera and the selection still work without leaving the mode.
 
 **სკოლა**, the school masterplan studio for Day 2 Block 4. A 150 × 120 m plot
 (1.8 ha, a realistic school site) with a 10 m grid, dimensioned edges, the street along the
@@ -286,9 +304,31 @@ trade to revisit if the classroom machines turn out to have room for it.
   ავტო-გლუვი (auto, smooth faces, sharp edges). Also on the panel.
 - **Segments.** Cones, cylinders, spheres and toruses carry a სეგმენტები slider, change the
   resolution and the shape keeps its size and position.
-- **Edit the shape itself.** Four modes: ობიექტი / წახნაგი / წიბო / წვერო. Drag a face and it
-  **extrudes like SketchUp's push/pull**; drag an edge or vertex to reshape. The panel also has
-  − / + and ⟲ ⟳ for exact steps when a gizmo drag is too fiddly.
+- **Edit the shape itself.** Four modes: ობიექტი / წახნაგი / წიბო / წვერო. Drag a face and the
+  face **moves**; drag an edge or vertex to reshape. The panel also has − / + and ⟲ ⟳ for exact
+  steps when a gizmo drag is too fiddly.
+- **Extruding is one deliberate gesture: <kbd>Shift</kbd> + drag an axis arrow**, with a face
+  selected. It used to happen on its own — a plain face drag grew a new volume the moment the
+  pointer passed 40 cm, so a student straightening a wall came away with geometry they never
+  asked for and could only find by counting faces. And Shift used to cut the new face on
+  *mouse-down*, so Shift plus a click, with no drag at all, added a face and an undo step. Now
+  the drag moves the face, Shift only arms the extrude, and the cut happens on the first real
+  movement — a quarter of a metre, so a pointer jittering under a heavy click is not the
+  difference between a plan and a plan with a stray face in it. ქალაქი always behaved this way;
+  the two halves now agree.
+- **Several faces at once.** <kbd>Ctrl</kbd>+click adds a face, edge or vertex to the selection
+  and <kbd>Ctrl</kbd>+clicking a marked one takes it out again, exactly as it already worked for
+  whole objects — in all four tabs, city included. A set never mixes levels: clicking a vertex
+  while faces are marked starts a fresh vertex selection, because no operation here could act on
+  "one face and one vertex". A set lives inside one shape; the panel says how many are marked.
+- **A colour for individual faces (წახნაგის ფერი).** With faces marked, the right panel offers a
+  colour that applies to those faces alone, and **ფიგურას** hands them back. The shape's own ფერი
+  stays underneath as what every unpainted face falls back to, so the two rows read as what they
+  are: one paints the object, the other paints part of it. Painted faces ride in a vertex-colour
+  attribute that only appears once a face is actually painted — a shape nobody has painted keeps
+  exactly the geometry and the plain material it always had. In ქალაქი **თეთრი მასები** still
+  wins over painted faces: it is a study mode, and that is exactly the kind of colour it exists
+  to take away for a moment.
 - **Inset (ჩაწევა).** With a face selected, ჩაწევა shrinks a smaller face inside it, ringed
   with new side faces, inset then extrude sinks a panel into a wall, the classic move.
 - **Boolean subtraction (გამოკლება).** Select a shape, press გამოკლება, then click the shape
@@ -387,7 +427,7 @@ site they have used, the number that makes them argue about density instead of g
 ## Controls
 
 The **i** button in the header (or <kbd>F1</kbd>, or <kbd>?</kbd>) opens the full
-sheet inside the app: 35 gestures in six groups, with a drawn mouse showing which
+sheet inside the app: 39 gestures in six groups, with a drawn mouse showing which
 button each one means. It opens by itself the first time a browser ever runs the
 app, and never again. The short version:
 
@@ -621,3 +661,247 @@ one.
 - Roads are flat ribbons draped on the terrain, not kerbed or cambered.
 - In the **ქალაქი** tab volumes are rectangles only, deliberate for a 60-minute block. The
   **სკოლა** tab is where free-form shaping lives.
+
+## Games inside the planner — ფაილი ▸ თამაში
+
+**ფაილი ▸ თამაში opens a list of all five**, so a student picks a game rather
+than landing in whichever was played last.
+
+The games live behind **ფაილი ▸ თამაში**, and they open a **separate world**:
+their own document, their own shapes, their own legend. Nothing built in a game
+can appear on a plan and no plan can appear in a game — the four architectural
+tabs are never touched, and the game is not one of them (no tab lights up while
+you are in it). **თამაშის დასრულება** puts you back on the tab you came from,
+with your work exactly as you left it. It is deliberately not remembered across
+a reload either: a game is a place you go, not a tab you were left on.
+
+The game world has **no sky** — flat slate, no horizon. A horizon tells the eye
+it is standing somewhere, which is the wrong idea when the whole point is that
+this place has nothing to do with the four sites. The grid is turned up with it
+(minor 0.22 to 0.55, major 0.42 to 0.90): the faint lines that read correctly as
+a studio floor under a bright sky vanish against grey, and a board with an
+invisible grid is no board.
+
+While a game is on, the planner's furniture goes away: the four tabs, the
+variants, the zoning and path tools, the figure for scale, the paint bucket, and
+save / open / clear. What is left is the modelling rail, the view controls, undo
+and the game itself. It is one class on the body rather than a dozen elements
+toggled from JS, so leaving a game cannot half-restore the interface.
+
+**Every game is played inside a marked plot** — a cyan line on the ground, sized
+per game: 90 x 90 m for the telephone and the shadow plan, 80 x 80 for the duel,
+one pedestal for the decoy, and the whole board for the sun duel, where the cyan
+cage *is* the rule — eighty metres square and six storeys tall.
+Without a boundary the board is an infinite plane, which breaks the games twice
+over: there is no brief to build against, and a model put down three hundred
+metres away still scores, because the comparison normalises position. Placing and
+dragging are clamped to the line; the gizmo can still push a shape past it, so the
+plot is checked once more before anything is handed over — and the stray shape is
+selected for you rather than merely complained about.
+
+In four of the five there is no game board and no block grid: you build with the
+primitives, the gizmo, face and edge editing and the booleans, exactly as you
+would on a plan. The game only decides **what the other player is allowed to
+see**, and how the two models are compared.
+
+- **გეგმის ტელეფონი** — they get a rendered plan AND a south elevation. Both
+  carry a scale bar, and the plan carries a north point, so a copy that is right
+  in every proportion but wrong in size is the player's mistake rather than the
+  drawing's.
+- **ჩრდილების გეგმა** — the top view only, with shadows. No elevation. Height
+  has to be read off the shadow.
+- **მოდელირების დუელი** — they see the model itself, in 3D, for fifteen seconds;
+  then it disappears and they rebuild it from memory. During those fifteen
+  seconds the model cannot be touched: the camera works in full, and nothing
+  else does. The point of the phase is to walk round it and look.
+- **თაროზე ნაკლული** — four sculptures the program built and one a person built
+  stand on a shelf; the other player says which hand was human. Guess right and
+  the guesser scores, guess wrong and the builder does, so it is worth building
+  something that does not look built. The four are drawn from **nine families**
+  without replacement, so they are always four different kinds of thing, and they
+  are the same four the student was shown while filling the gap — you are judged
+  against the company you were told to imitate. Each is generated from the same
+  primitives a student has, put together by the same moves — scale one, stack
+  two, sink a hole through it — because a pile of random boxes would be spotted
+  at a glance.
+  **The shelf also remembers.** Every finished piece is kept on that laptop, and
+  later rounds stand up to two of them out as the program's own — so a class
+  playing all afternoon ends up competing against itself, and the best decoy the
+  generator ever gets is one a child actually made. The question does not change:
+  it is still "which of these did the other player build just now", and the panel
+  says that older work may be on the shelf. Only a finished piece is kept, never
+  an empty pedestal, and only its geometry: a name, a legend or a painted face
+  would be a tell, and would leak one student's plan into another's game.
+
+The three that are scored on a rebuild — the telephone, the shadow plan and the
+duel — are won at **60% overlap or better**. That number is measured, not
+chosen: the comparison samples on an eighteen-cube lattice, so it resolves in
+steps of about eleven points, and 60 sits in the gap between two of them. A mass
+rebuilt a fifth too narrow scores 78 and wins; four blocks with one missing
+scores 67 and wins; the same model with its tower mirrored to the far end scores
+53 and loses, which is right, because a mirrored building is exactly the mistake
+a plan and an elevation exist to catch.
+
+**მზის დუელი** is the exception, and is played on a board rather than modelled:
+
+- Ten cells by ten, eight metres each. **Three towers each**, one to six storeys,
+  placed alternately, and the panel says whose turn it is. You may not build in
+  either garden.
+- The sun **walks the whole day** on a twelve-second loop while you play — a
+  winter sun, about forty degrees at noon, because daylight rights are argued on
+  the worst day of the year. Watching the shade sweep across the board is the
+  lesson, and it needs no explaining.
+- The score is the percentage of **garden-cell-hours** still in sun, sampled at
+  five hours of the day. It is a day, not an instant, which is what a
+  right-to-light argument actually measures. Whoever keeps more sun wins.
+- The board is symmetric by construction, so whatever one player can do to the
+  other, the other can do back. The version that briefly replaced this one was
+  not: its gardens sat outside the buildable strip, so at any sun angle one of
+  them could not be shaded at all — and the player pressing the score button also
+  owned the slider that decided which.
+- The board has its own ground and its own eight-metre cells, so the shadows are
+  visible across the whole site rather than only where they happen to cross a
+  garden — which is the thing the game is about.
+- There is nothing to model, so the modelling rail goes with it. A cell, a
+  storey slider and two scores are the whole interface.
+
+### Two ways to play
+
+**Hot seat.** One builds, presses **გადაეცი მეორეს**, the board clears, and the
+second player takes the mouse. **ორიგინალის ჩვენება** puts the original back
+afterwards so the two can be compared by eye as well as by number. Always works,
+needs nothing.
+
+**Two laptops.** Pick a game, then **ოთახის გახსნა**: type a name and wait. On
+the other laptop, **სხვას შემოუერთდი** shows every open room by its host's name
+and which game it is running; knocking asks, and the host says yes or no. Nobody
+is dropped into a game with a stranger without the host agreeing, and no child
+has to read a room number aloud across a classroom.
+
+The carrier is the same classroom server the standalone page uses — run
+`თამაშის-სერვერი.cmd` on the trainer's laptop. From there, either:
+
+- **open the planner from the server** — `http://<the trainer's address>:8830/bekura3d.html`
+  — and there is nothing at all to configure, because the page's own origin is
+  the server; or
+- **keep using the copy on the Desktop** and type the server's address once when
+  the lobby asks. It is remembered. The server sends the header that makes a
+  `file://` page allowed to ask.
+
+Each game hands over what it should and nothing more: the telephone and the
+shadow plan send the drawings, the duel sends the model for its fifteen seconds,
+the shelf sends the five works, and the sun duel sends one tower at a time. The
+panel always says whose turn it is, and the side that is not acting is told to
+wait rather than left with buttons that would break the round.
+
+Scoring is volume overlap, not a field-by-field diff: a torus and the same ring
+cut out of a box are the same object to anyone looking, and only overlap says so.
+Position is deliberately ignored — rebuilding it a few metres to the left is not
+a mistake worth marking — but size is not.
+
+## One mini game — `თამაში.html`
+
+A separate page, built by `bash build-game.sh` from `game.html`, opened by
+double-clicking exactly like the planner. **Deliberately not part of
+`bekura3d.html`**: that file is 13.5 MB and holds a team's work, and a game has
+no business being able to break it. The games share nothing with it but three.js.
+
+The three block-grid games that were once also on this page — ტელეფონი, დუელი and
+თაროზე ნაკლული — have been **removed** from it and rebuilt inside the planner so
+they use the real modelling tools. They are not kept in both places: two games
+with the same name in two different files is exactly how somebody opens the old
+one and reasonably concludes nothing was ever done. The page now points at the
+planner where they went.
+
+მზის დუელი now exists in **both** places, and on purpose. The grid is genuinely
+the right vocabulary for it — it is about massing and shadows, not about
+modelling — so the planner's copy is the same board with the same rules, reached
+through ფაილი ▸ თამაში like the other four. The lobby has moved across with it:
+all five of the planner's games can now be played host-and-join over the same
+server, so this page is no longer the only way to play across a room. It is kept
+because it is small — a few hundred kilobytes against fourteen megabytes — and
+because a game has no business being able to break a file that holds a team's
+work.
+
+- **მზის დუელი.** Each side owns a garden. You place towers to take the other
+  garden's sun without shading your own, and the panel scores the daylight each
+  garden keeps across five hours. It is the right-to-light argument — the thing
+  that makes tall buildings political — played in four minutes. The sun is a
+  **winter** one, about 41° at noon and 23° morning and evening: daylight rights
+  are always argued on the worst day of the year, and a summer sun overhead casts
+  stubs that make a dull duel. Whether a garden cell is lit is answered by walking
+  a ray toward the sun and asking what is in the way, so the score is exact rather
+  than sampled off the shadow map.
+- **ჩრდილების გეგმა (the shadow-plan variant).** The same game with one thing
+  taken away and one thing added: **no elevation at all**, just the top view —
+  but the sun is on. A plan cannot tell you how tall anything is; three towers
+  of 30 m, 14 m and 6 m are three identical squares. With shadows they are three
+  very different drawings. The sun is fixed at **35 degrees**, so a shadow is
+  **1.43 times** the height that cast it, and the drawing carries a 10 m grid to
+  count against — the rule is learnable once and then applies to every drawing.
+  It is also how heights are read off an aerial photograph, which surveyors
+  actually do. Outlines are dropped from this one on purpose: an edge round
+  every hidden face would give away the massing the shadow is there to hide.
+- **გეგმის ტელეფონი.** One player builds a massing. The other is handed only what
+  a drawing carries — the footprint from above and the silhouette from the south —
+  and has to put the volume back. The score is the difference in storeys. What the
+  drawing *drops* is the whole lesson, and losing marks to it is more convincing
+  than being told.
+
+- **მოდელირების დუელი.** Trading licks, in blocks. One player has a minute to
+  build something awkward; the other studies it in full 3D for fifteen seconds,
+  then it **disappears** and they rebuild it from memory against a clock. Then
+  they swap, and the two accuracy scores are the match. It is spatial memory
+  rather than drawing convention, which is why it is its own game and not a
+  harder setting of the telephone.
+- **თაროზე ნაკლული.** A Turing test with blocks. Four sculptures the program made
+  and one a person made stand on a shelf; the other player has to say which hand
+  was human. Guess right and the guesser scores, guess wrong and the builder
+  does — so it is worth building something that does not look built. It works
+  only because the generator has six real families with real rules (setback
+  tower, L and U plans, ziggurat, twin towers with a link, courtyard block, a
+  short walk that leaves a spine); a pile of random cubes would be spotted at a
+  glance and the game would be over in one look.
+
+### Playing between laptops, with no internet
+
+Three ways, and the games do not know which is in use:
+
+- **ადგილობრივი** — one laptop, pass the mouse. Always works, needs nothing.
+- **კოდი** — each move becomes a short string students read out or paste to each
+  other. No network at all. Turn-based, and fine for the telephone game.
+### The room, and who is in it
+
+A network game is **named, and the host decides**. The host types a name and
+opens a room; joiners see a live list of open rooms with the host name and which
+game is running, and pick one. Knocking sends a request the host sees by name —
+**გიორგი ითხოვს შემოერთებას** — with დაშვება and უარი. Nobody is dropped into a
+game with a stranger without the host agreeing, and there is no room number for a
+classroom to get wrong on both sides. A host that goes quiet drops off the list
+after twenty-five seconds, so a laptop closed mid-game does not sit there all
+afternoon.
+
+- **ქსელი** — the trainer runs **`თამაშის-სერვერი.cmd`** and the room joins by the
+  address it prints. That server is PowerShell's own `HttpListener` in about a
+  hundred lines: **no Node, no Python, no install, no admin** for the common case.
+  It keeps one append-only message log per room in memory and clients poll it —
+  short polling rather than sockets on purpose, since these games move once per
+  turn and a socket server in PowerShell is a great deal of code for no gain.
+
+Nothing is written to disk and no room survives closing the window. A room is a
+lobby, not a save file.
+
+**If it says only this laptop can reach it**, Windows would not let a non-admin
+process listen for the whole network. Either run the `.cmd` as administrator, or
+grant it once from an admin console:
+
+    netsh http add urlacl url=http://+:8830/ user=Everyone
+
+Expect a one-time Windows Firewall prompt; say yes for a private network. A page
+served this way has a different browser origin from the double-clicked planner,
+so a game cannot see students' saved plans — which is fine, because it has no
+business seeing them.
+
+`game.html?selftest=1` runs 4 assertions over the parts with no pixels in them:
+where shade falls, what a drawing keeps and drops, and whether a code survives
+Georgian and comes back the same.

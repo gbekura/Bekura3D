@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="ka">
+<head>
+<meta charset="utf-8">
+<title>Bekura3D — თამაშები</title>
+<!--
+  Two mini games for the ArchiTech Park workshop. Deliberately NOT part of
+  bekura3d.html: the planner is a 13.5 MB file students trust with their work,
+  and a game has no business being able to break it. This is its own page, its
+  own storage, its own build.
+
+  Both games are architecture, not arcade. მზის დუელი is a right-to-light
+  argument played as a duel — the thing that makes tall buildings political.
+  გეგმის ტელეფონი is the plan-and-elevation reading exercise, played as
+  Chinese whispers. Blocks on a grid rather than the full editor, because a
+  game has to be learnable in forty seconds.
+
+  Multiplayer without a server or the internet, which is the classroom:
+    ადგილობრივი — one laptop, pass the mouse. Always works.
+    კოდი        — a short string typed or read aloud between laptops.
+    ქსელი       — the trainer runs თამაშის-სერვერი.cmd and the room joins by IP.
+  The games do not know which is in use; NET hides all three.
+-->
+<style>
+  :root{ --navy-3:#0F1B2E; --navy:#16253F; --navy-2:#1D3053; --cyan:#33BEC4;
+         --ka:"Segoe UI","Noto Sans Georgian",system-ui,sans-serif; }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--navy-3);color:#fff;font-family:var(--ka);
+            overflow:hidden}
+  canvas{display:block}
+  header{height:52px;display:flex;align-items:center;gap:14px;padding:0 16px;
+         background:var(--navy);border-bottom:1px solid rgba(255,255,255,.12)}
+  header .brand{font-weight:700;letter-spacing:.3px}
+  header .brand span{color:var(--cyan)}
+  header .who{margin-left:auto;font-size:13px;color:rgba(255,255,255,.6)}
+  #wrap{display:flex;height:calc(100% - 52px)}
+  #view{flex:1;position:relative;min-width:0}
+  #side{width:310px;flex:none;background:var(--navy);border-left:1px solid rgba(255,255,255,.12);
+        padding:16px;overflow-y:auto}
+  h3{font-size:10.5px;letter-spacing:1.5px;color:rgba(255,255,255,.42);
+     text-transform:uppercase;margin:0 0 10px}
+  section{margin-bottom:18px}
+  p{font-size:13.5px;line-height:1.55;color:rgba(255,255,255,.8);margin:0 0 10px}
+  p.small{font-size:12.5px;color:rgba(255,255,255,.5)}
+  button{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#fff;
+         font-family:var(--ka);font-size:14px;border-radius:9px;padding:9px 12px;cursor:pointer;
+         transition:background .15s ease,border-color .15s ease}
+  button:hover{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.32)}
+  button.go{background:var(--cyan);color:var(--navy-3);border-color:var(--cyan);font-weight:700}
+  button.go:hover{background:#4fd3d9}
+  button[disabled]{opacity:.4;cursor:default}
+  button.wide{width:100%;margin-bottom:8px}
+  input,select{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.18);
+               color:#fff;font-family:var(--ka);font-size:14px;border-radius:8px;padding:8px 10px;
+               width:100%;margin-bottom:8px}
+  code{display:block;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);
+       border-radius:8px;padding:9px 10px;font-family:Consolas,monospace;font-size:12px;
+       color:#CFE6E8;word-break:break-all;max-height:120px;overflow-y:auto;margin-bottom:8px}
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+  .row label{font-size:13px;color:rgba(255,255,255,.7);width:88px;flex:none}
+  .val{font-variant-numeric:tabular-nums;font-size:14px}
+  .score{display:flex;gap:10px;margin-bottom:10px}
+  .sc{flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+      border-radius:10px;padding:9px 10px}
+  .sc b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+  .sc.me{border-color:var(--cyan)}
+  .sc i{font-style:normal;font-size:11.5px;color:rgba(255,255,255,.5)}
+  #menu{position:absolute;inset:0;display:grid;place-items:center;
+        background:rgba(15,27,46,.96);z-index:20}
+  #menu .card{width:min(560px,92vw);background:var(--navy);border-radius:16px;padding:26px 28px;
+              border:1px solid rgba(255,255,255,.16);box-shadow:0 24px 60px rgba(0,0,0,.55)}
+  #menu h1{font-size:19px;margin:0 0 4px}
+  #menu .sub{font-size:13px;color:rgba(255,255,255,.55);margin:0 0 18px}
+  .pick{display:flex;gap:10px;margin-bottom:14px}
+  .pick button{flex:1;text-align:left;padding:12px 13px;line-height:1.4}
+  .pick button.on{border-color:var(--cyan);background:rgba(51,190,196,.18)}
+  .pick button b{display:block;font-size:14.5px;margin-bottom:3px}
+  .pick button span{font-size:12px;color:rgba(255,255,255,.55)}
+  .pick2{flex-wrap:wrap}
+  .pick2 button{flex:1 1 46%}
+  .moved{background:rgba(51,190,196,.10);border:1px solid rgba(51,190,196,.38);
+         border-radius:10px;padding:11px 13px;margin-bottom:14px;
+         font-size:12.5px;line-height:1.6;color:rgba(255,255,255,.72)}
+  .moved b{color:#BFF3F5}
+  .moved a{display:inline-block;margin-top:7px;color:var(--cyan);font-weight:700;
+           text-decoration:none;border-bottom:1px solid rgba(51,190,196,.5)}
+  #lobby{position:absolute;inset:0;display:none;place-items:center;
+         background:rgba(15,27,46,.96);z-index:21}
+  #lobby.on{display:grid}
+  #lobby .card{width:min(520px,92vw);background:var(--navy);border-radius:16px;padding:26px 28px;
+               border:1px solid rgba(255,255,255,.16);box-shadow:0 24px 60px rgba(0,0,0,.55)}
+  #lobby h1{font-size:19px;margin:0 0 4px}
+  .rooms{display:flex;flex-direction:column;gap:8px;margin-bottom:12px;max-height:250px;overflow-y:auto}
+  .rooms button{text-align:left;line-height:1.4}
+  .rooms button b{display:block;font-size:14.5px}
+  .rooms button span{font-size:12px;color:rgba(255,255,255,.55)}
+  .req{display:flex;gap:8px;align-items:center;background:rgba(51,190,196,.12);
+       border:1px solid rgba(51,190,196,.4);border-radius:10px;padding:9px 11px;margin-bottom:8px}
+  .req .nm{flex:1;font-size:14px}
+  .req button{padding:6px 11px;font-size:13px}
+  .clock{font-variant-numeric:tabular-nums;font-size:34px;font-weight:700;
+         text-align:center;margin:2px 0 8px}
+  .clock.low{color:#FF8A7A}
+  #hint{position:absolute;left:0;right:0;bottom:0;padding:9px 14px;font-size:13px;
+        background:rgba(15,27,46,.86);color:rgba(255,255,255,.85);
+        border-top:1px solid rgba(255,255,255,.1)}
+  #out{position:fixed;inset:0;background:#0b1524;color:#cfe;font:12px Consolas,monospace;
+       padding:14px;overflow:auto;display:none;z-index:99;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Bekura3D / <span>თამაშები</span></div>
+  <div class="who" id="who"></div>
+</header>
+<div id="wrap">
+  <div id="view"><div id="hint"></div></div>
+  <div id="side"></div>
+</div>
+
+<div id="menu"><div class="card">
+  <h1>მზის დუელი</h1>
+  <p class="sub">ააშენე ისე, რომ მეზობელს მზე წაართვა — და შენსას შეინარჩუნო.</p>
+  <div class="pick" id="pickGame">
+    <button data-g="sun" class="on"><b>მზის დუელი</b><span>ორი ბაღი, ექვსი კოშკი. ვინც მეტ მზეს შეინარჩუნებს, იგებს.</span></button>
+  </div>
+  <div class="moved">
+    <b>დანარჩენი სამი თამაში აქ აღარაა.</b>
+    გეგმის ტელეფონი, ჩრდილების გეგმა, მოდელირების დუელი — ისინი ახლა
+    <b>Bekura3D-შია</b>, ჩანართზე <b>საბაზისო</b>, მარჯვენა პანელში, სექცია
+    <b>ᲗᲐᲛᲐᲨᲘ</b>. იქ ნამდვილი ხელსაწყოებით თამაშობ: პრიმიტივები, გიზმო,
+    წახნაგები, გამოკლება.
+    <a href="bekura3d.html">Bekura3D-ის გახსნა →</a>
+  </div>
+  <h3>ᲗᲐᲛᲐᲨᲘᲡ ᲬᲔᲡᲘ</h3>
+  <div class="pick" id="pickNet">
+    <button data-n="local"><b>ადგილობრივი</b><span>ერთი ლეპტოპი, თაგვს გადასცემთ. ყოველთვის მუშაობს.</span></button>
+    <button data-n="code"><b>კოდი</b><span>მოკლე კოდს ერთმანეთს კარნახობთ. ქსელი არ სჭირდება.</span></button>
+    <button data-n="lan"><b>ქსელი</b><span>ტრენერი უშვებს სერვერს, დანარჩენები უერთდებიან.</span></button>
+  </div>
+  <h3>ᲨᲔᲜᲘ ᲡᲐᲮᲔᲚᲘ</h3>
+  <input id="myname" maxlength="18" placeholder="დაწერე სახელი — მეორე ამას დაინახავს">
+  <div id="netCfg"></div>
+  <button class="go wide" id="start">დაწყება</button>
+</div></div>
+
+<div id="lobby"><div class="card">
+  <h1 id="lobTitle">ოთახი</h1>
+  <p class="sub" id="lobSub"></p>
+  <div id="lobBody"></div>
+  <button class="wide" id="lobBack">უკან</button>
+</div></div>
+
+<div id="out"></div>
+
+<script src="lib/three.min.js"></script>
+<script>
+"use strict";
+// ---------------------------------------------------------------- constants
+var CELL = 8;                 // metres per grid cell
+var FLOOR = 3.5;              // metres per storey, as in the planner
+var N = 10;                   // sun-duel board is N x N
+var TELN = 6;                 // telephone board is TELN x TELN
+var MAXH = 6;                 // storeys
+
+// ---------------------------------------------------------------- transport
+// One interface, three ways of carrying a message. A game calls NET.send() and
+// listens on NET.onmsg; nothing above this line knows whether the other player
+// is on this laptop, reading a code aloud, or on the far side of a room.
+var NET = {
+  mode: "local", room: "", me: 0, host: false,
+  onmsg: null, _since: 0, _timer: null, _url: "",
+
+  start: function (cfg, cb) {
+    this.mode = cfg.mode; this.room = cfg.room || "1"; this.host = !!cfg.host;
+    this.me = cfg.host ? 0 : 1;
+    this.onmsg = cb;
+    if (this.mode === "lan") {
+      // Served from the trainer's laptop, so the page's own origin is the
+      // server. No address to configure and nothing to get wrong.
+      this._url = location.origin + "/r/" + encodeURIComponent(this.room);
+      this._poll();
+    }
+  },
+  send: function (msg) {
+    msg.from = this.me;
+    if (this.mode === "local") { if (this.onmsg) this.onmsg(msg); return; }
+    if (this.mode === "code")  { UI.showCode(msg); return; }
+    fetch(this._url, { method: "POST", body: JSON.stringify(msg) }).catch(function () {});
+  },
+  // Short polling rather than a socket: PowerShell's HttpListener is a few
+  // lines and a socket server is not, and these games move once per turn.
+  _poll: function () {
+    var self = this;
+    fetch(this._url + "?since=" + this._since)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        self._since = d.n;
+        (d.msgs || []).forEach(function (m) {
+          if (m.from !== self.me && self.onmsg) self.onmsg(m);
+        });
+      })
+      .catch(function () {})
+      .then(function () { self._timer = setTimeout(function () { self._poll(); }, 700); });
+  },
+  stop: function () {
+    if (this._timer) clearTimeout(this._timer); this._timer = null;
+    if (this._beat) clearInterval(this._beat); this._beat = null;
+  },
+
+  // A host says who it is and keeps saying so. The list is built from these, and
+  // a host that goes quiet drops off it — a laptop closed mid-game would
+  // otherwise sit in the room list for the rest of the afternoon.
+  announce: function (name, game) {
+    var self = this;
+    function beat() {
+      fetch("/rooms?room=" + encodeURIComponent(self.room),
+            { method: "POST", body: JSON.stringify({ host: name, game: game }) })
+        .catch(function () {});
+    }
+    beat();
+    this._beat = setInterval(beat, 8000);
+  },
+  rooms: function () {
+    return fetch("/rooms").then(function (r) { return r.json(); })
+      .then(function (d) { return d.rooms || []; })
+      .catch(function () { return []; });
+  }
+};
+
+// ---------------------------------------------------------------- lobby
+// Who is joining whom, and the host saying yes. A room with no name is a room
+// full of children shouting "is that you?" across a classroom, so a host types a
+// name, a joiner sees it before knocking, and nobody is dropped into a game with
+// a stranger without the host agreeing.
+var LOBBY = {
+  name: "", game: "", pending: [], joined: false, _tick: null,
+
+  el: function () { return document.getElementById("lobby"); },
+  show: function (on) { this.el().classList.toggle("on", !!on); },
+  close: function () {
+    this.show(false);
+    if (this._tick) clearInterval(this._tick);
+    this._tick = null;
+  },
+
+  host: function (name, game) {
+    var self = this;
+    this.name = name; this.game = game; this.pending = []; this.joined = false;
+    NET.room = "r" + Math.floor(Date.now() % 1e7) + Math.floor(Math.random() * 900 + 100);
+    NET.mode = "lan"; NET.host = true; NET.me = 0;
+    NET._url = location.origin + "/r/" + encodeURIComponent(NET.room);
+    NET._since = 0;
+    NET.onmsg = function (m) { self.hostMsg(m); };
+    NET._poll();
+    NET.announce(name, game);
+    document.getElementById("lobTitle").textContent = "ოთახი გახსნილია";
+    document.getElementById("lobSub").textContent =
+      name + " · " + GAMENAME[game] + " — ელოდები, ვინ შემოგიერთდება.";
+    this.show(true);
+    this.paintHost();
+  },
+  hostMsg: function (m) {
+    if (m.t !== "join/req" || this.joined) return;
+    if (this.pending.indexOf(m.name) >= 0) return;
+    this.pending.push(m.name);
+    this.paintHost();
+  },
+  paintHost: function () {
+    var b = document.getElementById("lobBody"), self = this;
+    if (!this.pending.length) {
+      b.innerHTML = '<p class="small">ჯერ არავინ. მეორემ უნდა აირჩიოს <b>ქსელი</b> და ' +
+                    'სიაში შენი სახელი დაინახოს.</p>';
+      return;
+    }
+    b.innerHTML = this.pending.map(function (n, i) {
+      return '<div class="req"><span class="nm"><b>' + esc(n) + '</b> ითხოვს შემოერთებას</span>' +
+             '<button class="go" data-ok="' + i + '">დაშვება</button>' +
+             '<button data-no="' + i + '">უარი</button></div>';
+    }).join("");
+    b.querySelectorAll("[data-ok]").forEach(function (x) {
+      x.onclick = function () {
+        var n = self.pending[+x.dataset.ok];
+        self.joined = true;
+        NET.send({ t: "join/ok", to: n });
+        self.close();
+        beginGame(self.game, 0);
+      };
+    });
+    b.querySelectorAll("[data-no]").forEach(function (x) {
+      x.onclick = function () {
+        var n = self.pending.splice(+x.dataset.no, 1)[0];
+        NET.send({ t: "join/no", to: n });
+        self.paintHost();
+      };
+    });
+  },
+
+  browse: function (name) {
+    var self = this;
+    this.name = name;
+    document.getElementById("lobTitle").textContent = "ღია ოთახები";
+    document.getElementById("lobSub").textContent = name + " — აირჩიე, ვის შემოუერთდე.";
+    this.show(true);
+    var draw = function () {
+      NET.rooms().then(function (rs) {
+        var b = document.getElementById("lobBody");
+        if (!rs.length) {
+          b.innerHTML = '<p class="small">ღია ოთახი ჯერ არ არის. დაელოდე, სანამ ვინმე ' +
+                        'გახსნის — სია თავისით განახლდება.</p>';
+          return;
+        }
+        b.innerHTML = '<div class="rooms">' + rs.map(function (r) {
+          return '<button data-room="' + esc(r.room) + '"><b>' + esc(r.info.host) +
+                 '</b><span>' + (GAMENAME[r.info.game] || r.info.game) + '</span></button>';
+        }).join("") + '</div>';
+        b.querySelectorAll("[data-room]").forEach(function (x) {
+          x.onclick = function () {
+            var r = rs.filter(function (q) { return q.room === x.dataset.room; })[0];
+            self.knock(r);
+          };
+        });
+      });
+    };
+    draw();
+    this._tick = setInterval(draw, 3000);
+  },
+  knock: function (r) {
+    var self = this;
+    if (this._tick) clearInterval(this._tick);
+    this._tick = null;
+    this.game = r.info.game;
+    NET.room = r.room; NET.mode = "lan"; NET.host = false; NET.me = 1;
+    NET._url = location.origin + "/r/" + encodeURIComponent(NET.room);
+    NET._since = 0;
+    NET.onmsg = function (m) {
+      if (m.t === "join/ok" && m.to === self.name) {
+        self.close();
+        beginGame(self.game, 1);
+      } else if (m.t === "join/no" && m.to === self.name) {
+        document.getElementById("lobBody").innerHTML =
+          '<p>უარი გითხრეს. სცადე სხვა ოთახი.</p>';
+        setTimeout(function () { self.browse(self.name); }, 1400);
+      }
+    };
+    NET._poll();
+    NET.send({ t: "join/req", name: this.name });
+    document.getElementById("lobSub").textContent =
+      esc(r.info.host) + " — დააკაკუნე, ელოდები პასუხს…";
+    document.getElementById("lobBody").innerHTML =
+      '<p class="small">მასპინძელმა უნდა დაგრთოს ნება. დაელოდე.</p>';
+  }
+};
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+var GAMENAME = { sun: "მზის დუელი", tel: "გეგმის ტელეფონი",
+                 duel: "მოდელირების დუელი", shelf: "თაროზე ნაკლული" };
+
+// A message as a string a fourteen-year-old can read out over a desk. JSON, then
+// URI-escaped UTF-8, then base64 — btoa alone throws on the Georgian in a name.
+function packMsg(o) {
+  return btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/=+$/, "");
+}
+function unpackMsg(s) {
+  try { return JSON.parse(decodeURIComponent(escape(atob(s.trim())))); }
+  catch (e) { return null; }
+}
+
+// ---------------------------------------------------------------- sun
+// Where the sun stands, as a direction. Not a real solar model — what the game
+// needs is that the light crosses the board through the day and stands highest
+// at noon, which is the thing being argued about.
+//
+// A WINTER sun on purpose: the peak is about 40 degrees, not 60. Daylight rights
+// are always argued on the worst day of the year, because a scheme that keeps
+// your neighbour's winter sun keeps it all year. It is also the better game — a
+// summer sun overhead casts stubs, and a duel where the best move costs the
+// other side ten percent is not a duel.
+// Built as a proper direction on the hemisphere — elevation and azimuth, no
+// fudge factor — so el really is the angle above the horizon. An earlier version
+// squashed one axis to tilt the path and then normalised, which quietly pushed
+// the noon sun to 69 degrees while the code said 40: the shadows were half the
+// length the comment promised. If this is ever tuned again, check it with
+// asin(sunDir(12).y), not by reading the constant.
+function sunDir(hour) {
+  var t = (hour - 6) / 12;                        // 0 at 06:00, 1 at 18:00
+  var el = Math.sin(Math.PI * t) * 0.62 + 0.10;   // 6° at the ends, 41° at noon
+  var az = -Math.PI / 2 + Math.PI * t;            // one side, across, the other
+  return new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el),
+                           -Math.cos(el) * Math.cos(az));
+}
+var HOURS = [8, 10, 12, 14, 16];
+
+// Is this ground point lit at this hour? Walk toward the sun and see whether any
+// tower is in the way. Exact, and it does not need the shadow map read back —
+// which a browser will not give you cheaply anyway.
+function litAt(pt, hour, towers) {
+  var d = sunDir(hour);
+  if (d.y <= 0.02) return false;
+  for (var i = 0; i < towers.length; i++) {
+    var t = towers[i];
+    var h = t.h * FLOOR;
+    // how far along the ray until it reaches this tower's column
+    var minx = t.x * CELL, maxx = minx + CELL;
+    var minz = t.z * CELL, maxz = minz + CELL;
+    var t0 = 0, t1 = 1e9, ok = true;
+    [[pt.x, d.x, minx, maxx], [pt.z, d.z, minz, maxz]].forEach(function (a) {
+      var o = a[0], dd = a[1], lo = a[2], hi = a[3];
+      if (Math.abs(dd) < 1e-9) { if (o < lo || o > hi) ok = false; return; }
+      var ta = (lo - o) / dd, tb = (hi - o) / dd;
+      if (ta > tb) { var s = ta; ta = tb; tb = s; }
+      if (ta > t0) t0 = ta;
+      if (tb < t1) t1 = tb;
+    });
+    if (!ok || t0 > t1 || t1 < 0) continue;
+    var tt = Math.max(t0, 0);
+    if (pt.y + d.y * tt < h) return false;        // the column is still above us
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------- three
+var scene, camera, renderer, root, raf = null;
+var orbit = { az: -0.7, el: 0.85, r: 190, tx: N * CELL / 2, tz: N * CELL / 2 };
+
+function initGL() {
+  var view = document.getElementById("view");
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x16253F);
+  camera = new THREE.PerspectiveCamera(45, 1, 0.5, 4000);
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  view.insertBefore(renderer.domElement, view.firstChild);
+  root = new THREE.Group();
+  scene.add(root);
+
+  scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x33405c, 0.85));
+  var sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  var s = N * CELL;
+  sun.shadow.camera.left = -s; sun.shadow.camera.right = s;
+  sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
+  sun.shadow.camera.far = s * 4;
+  scene.add(sun);
+  scene.add(sun.target);
+  scene.userData.sun = sun;
+
+  resize();
+  window.addEventListener("resize", resize);
+  wireCamera();
+  loop();
+}
+function resize() {
+  var v = document.getElementById("view");
+  var w = v.clientWidth, h = v.clientHeight;
+  if (!w || !h) return;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+function placeCamera() {
+  var ce = Math.cos(orbit.el);
+  camera.position.set(orbit.tx + Math.sin(orbit.az) * ce * orbit.r,
+                      Math.sin(orbit.el) * orbit.r,
+                      orbit.tz + Math.cos(orbit.az) * ce * orbit.r);
+  camera.lookAt(orbit.tx, 0, orbit.tz);
+}
+function wireCamera() {
+  var el = renderer.domElement, drag = null;
+  el.addEventListener("pointerdown", function (e) {
+    if (e.button === 2 || e.shiftKey) { drag = { x: e.clientX, y: e.clientY }; el.setPointerCapture(e.pointerId); }
+  });
+  el.addEventListener("pointermove", function (e) {
+    if (!drag) return;
+    orbit.az -= (e.clientX - drag.x) * 0.007;
+    orbit.el = Math.max(0.15, Math.min(1.45, orbit.el + (e.clientY - drag.y) * 0.005));
+    drag.x = e.clientX; drag.y = e.clientY;
+  });
+  el.addEventListener("pointerup", function () { drag = null; });
+  el.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  el.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    orbit.r = Math.max(60, Math.min(500, orbit.r * (e.deltaY > 0 ? 1.1 : 0.9)));
+  }, { passive: false });
+}
+function loop() {
+  placeCamera();
+  if (GAME && GAME.frame) GAME.frame();
+  renderer.render(scene, camera);
+  raf = requestAnimationFrame(loop);
+}
+function clearRoot() {
+  for (var i = root.children.length - 1; i >= 0; i--) {
+    var o = root.children[i];
+    root.remove(o);
+    o.traverse(function (c) {
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) c.material.dispose();
+    });
+  }
+}
+// The cell under the cursor, or null. One ground plane, no terrain: a game
+// board has to be legible at a glance and a hillside is not.
+var _ray = new THREE.Raycaster(), _nd = new THREE.Vector2(), _pl = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
+function cellAt(ev, n) {
+  var r = renderer.domElement.getBoundingClientRect();
+  _nd.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
+  _nd.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
+  _ray.setFromCamera(_nd, camera);
+  var p = new THREE.Vector3();
+  if (!_ray.ray.intersectPlane(_pl, p)) return null;
+  var x = Math.floor(p.x / CELL), z = Math.floor(p.z / CELL);
+  if (x < 0 || z < 0 || x >= n || z >= n) return null;
+  return { x: x, z: z };
+}
+function addGround(n, colA, colB) {
+  var g = new THREE.Mesh(new THREE.PlaneGeometry(n * CELL, n * CELL),
+    new THREE.MeshLambertMaterial({ color: 0xE8EDF3 }));
+  g.rotation.x = -Math.PI / 2;
+  g.position.set(n * CELL / 2, 0, n * CELL / 2);
+  g.receiveShadow = true;
+  root.add(g);
+  var gl = new THREE.GridHelper(n * CELL, n, 0x9fb0c4, 0xc8d4e0);
+  gl.position.set(n * CELL / 2, 0.02, n * CELL / 2);
+  root.add(gl);
+  return g;
+}
+function addBlock(x, z, h, col, n) {
+  var m = new THREE.Mesh(new THREE.BoxGeometry(CELL * 0.86, h * FLOOR, CELL * 0.86),
+    new THREE.MeshLambertMaterial({ color: col }));
+  m.position.set(x * CELL + CELL / 2, h * FLOOR / 2, z * CELL + CELL / 2);
+  m.castShadow = true; m.receiveShadow = true;
+  root.add(m);
+  m.add(new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
+    new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })));
+  return m;
+}
+function addPatch(x0, z0, w, d, col, y) {
+  var m = new THREE.Mesh(new THREE.PlaneGeometry(w * CELL, d * CELL),
+    new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.55,
+                                  side: THREE.DoubleSide }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x0 * CELL + w * CELL / 2, y || 0.06, z0 * CELL + d * CELL / 2);
+  root.add(m);
+  return m;
+}
+
+// ---------------------------------------------------------------- UI plumbing
+var UI = {
+  side: function (html) { document.getElementById("side").innerHTML = html; },
+  hint: function (t) { document.getElementById("hint").innerHTML = t; },
+  who:  function (t) { document.getElementById("who").textContent = t; },
+  showCode: function (msg) {
+    var box = document.getElementById("codeout");
+    if (box) box.textContent = packMsg(msg);
+  }
+};
+
+// ================================================================ SUN DUEL
+// Right to light, as a duel. Each side owns a garden. You place towers to take
+// the other garden's sun without shading your own — which is the whole argument
+// about tall buildings next to somebody's house, played in four minutes.
+var SunDuel = {
+  id: "sun",
+  towers: [], turn: 0, left: [3, 3], gardens: null, ghost: null, hpick: 3, done: false,
+
+  init: function () {
+    this.towers = []; this.turn = 0; this.left = [3, 3]; this.done = false;
+    this.gardens = [
+      { x0: 0, z0: 3, w: 2, d: 4, col: 0x33BEC4 },      // player 0, west
+      { x0: 8, z0: 3, w: 2, d: 4, col: 0xE8A33C }       // player 1, east
+    ];
+    this.build();
+    this.panel();
+    this.hintTurn();
+    renderer.domElement.addEventListener("pointerdown", this.click);
+    renderer.domElement.addEventListener("pointermove", this.hover);
+  },
+  stop: function () {
+    renderer.domElement.removeEventListener("pointerdown", this.click);
+    renderer.domElement.removeEventListener("pointermove", this.hover);
+  },
+  inGarden: function (x, z) {
+    for (var i = 0; i < this.gardens.length; i++) {
+      var g = this.gardens[i];
+      if (x >= g.x0 && x < g.x0 + g.w && z >= g.z0 && z < g.z0 + g.d) return i;
+    }
+    return -1;
+  },
+  occupied: function (x, z) {
+    return this.towers.some(function (t) { return t.x === x && t.z === z; });
+  },
+  build: function () {
+    clearRoot();
+    addGround(N);
+    var self = this;
+    this.gardens.forEach(function (g) { addPatch(g.x0, g.z0, g.w, g.d, g.col); });
+    this.towers.forEach(function (t) {
+      addBlock(t.x, t.z, t.h, t.p === 0 ? 0x6FA8DC : 0xD98E3B, N);
+    });
+    this.ghost = addBlock(-99, -99, this.hpick, 0xffffff, N);
+    this.ghost.material.transparent = true;
+    this.ghost.material.opacity = 0.35;
+    this.ghost.castShadow = false;
+    this.ghost.visible = false;
+  },
+  // Percentage of garden-cell-hours that still get sun.
+  score: function (pi) {
+    var g = this.gardens[pi], lit = 0, total = 0, self = this;
+    for (var x = g.x0; x < g.x0 + g.w; x++)
+      for (var z = g.z0; z < g.z0 + g.d; z++)
+        HOURS.forEach(function (h) {
+          total++;
+          var p = new THREE.Vector3(x * CELL + CELL / 2, 1.5, z * CELL + CELL / 2);
+          if (litAt(p, h, self.towers)) lit++;
+        });
+    return total ? Math.round(lit / total * 100) : 100;
+  },
+  hintTurn: function () {
+    if (this.done) return;
+    UI.hint(NET.mode === "local"
+      ? "<b>მოთამაშე " + (this.turn + 1) + "</b> — დადგი კოშკი. მარჯვენა ღილაკი ატრიალებს ხედს."
+      : (this.turn === NET.me ? "<b>შენი სვლაა.</b> დადგი კოშკი."
+                              : "მოწინააღმდეგის სვლაა…"));
+  },
+  panel: function () {
+    var a = this.score(0), b = this.score(1);
+    var mine = NET.mode === "local" ? this.turn : NET.me;
+    UI.side(
+      '<section><h3>ᲛᲖᲔ ᲑᲐᲦᲨᲘ</h3><div class="score">' +
+      '<div class="sc' + (mine === 0 ? " me" : "") + '"><i>ცისფერი ბაღი</i><b>' + a + '%</b></div>' +
+      '<div class="sc' + (mine === 1 ? " me" : "") + '"><i>ნარინჯისფერი ბაღი</i><b>' + b + '%</b></div>' +
+      '</div><p class="small">დღის ხუთი საათი, ბაღის ყოველი უჯრა. ვინც მეტ მზეს შეინარჩუნებს, იგებს.</p></section>' +
+      '<section><h3>ᲙᲝᲨᲙᲘ</h3>' +
+      '<div class="row"><label>სართული</label><input type="range" id="hh" min="1" max="' + MAXH +
+      '" step="1" value="' + this.hpick + '"><span class="val" id="hv">' + this.hpick + '</span></div>' +
+      '<div class="row"><label>დარჩა</label><span class="val">' +
+      this.left[0] + ' · ' + this.left[1] + '</span></div></section>' +
+      (this.done ? '<section><h3>ᲨᲔᲓᲔᲒᲘ</h3><p><b>' +
+        (a === b ? "ფრე." : (a > b ? "ცისფერი იგებს." : "ნარინჯისფერი იგებს.")) +
+        '</b></p><button class="go wide" id="again">თავიდან</button></section>' : "") +
+      (NET.mode === "code" ? '<section><h3>ᲙᲝᲓᲘ</h3><code id="codeout">—</code>' +
+        '<input id="codein" placeholder="ჩასვი მოწინააღმდეგის კოდი">' +
+        '<button class="wide" id="codego">გაშვება</button></section>' : "")
+    );
+    var self = this;
+    var hh = document.getElementById("hh");
+    if (hh) hh.oninput = function () {
+      self.hpick = +this.value;
+      document.getElementById("hv").textContent = this.value;
+      if (self.ghost) {
+        self.ghost.geometry.dispose();
+        self.ghost.geometry = new THREE.BoxGeometry(CELL * 0.86, self.hpick * FLOOR, CELL * 0.86);
+      }
+    };
+    var ag = document.getElementById("again");
+    if (ag) ag.onclick = function () { self.init(); };
+    wireCodeBox();
+  },
+  hover: function (ev) {
+    var S = SunDuel;
+    if (S.done || !S.ghost) return;
+    var c = cellAt(ev, N);
+    var mine = NET.mode === "local" ? S.turn : NET.me;
+    if (!c || S.turn !== mine || S.inGarden(c.x, c.z) >= 0 || S.occupied(c.x, c.z)) {
+      S.ghost.visible = false; return;
+    }
+    S.ghost.visible = true;
+    S.ghost.position.set(c.x * CELL + CELL / 2, S.hpick * FLOOR / 2, c.z * CELL + CELL / 2);
+  },
+  click: function (ev) {
+    var S = SunDuel;
+    if (ev.button !== 0 || ev.shiftKey || S.done) return;
+    var mine = NET.mode === "local" ? S.turn : NET.me;
+    if (S.turn !== mine) return;
+    var c = cellAt(ev, N);
+    if (!c) return;
+    if (S.inGarden(c.x, c.z) >= 0) { UI.hint("ბაღში აშენება არ შეიძლება."); return; }
+    if (S.occupied(c.x, c.z)) { UI.hint("აქ უკვე დგას კოშკი."); return; }
+    S.play({ t: "sun/put", x: c.x, z: c.z, h: S.hpick, p: S.turn });
+    NET.send({ t: "sun/put", x: c.x, z: c.z, h: S.hpick, p: S.turn });
+  },
+  play: function (m) {
+    if (m.t !== "sun/put") return;
+    if (this.occupied(m.x, m.z)) return;
+    this.towers.push({ x: m.x, z: m.z, h: m.h, p: m.p });
+    this.left[m.p]--;
+    this.turn = 1 - m.p;
+    if (this.left[0] <= 0 && this.left[1] <= 0) this.done = true;
+    this.build();
+    this.panel();
+    this.hintTurn();
+    if (this.done) UI.hint("დასრულდა. შედეგი პანელშია.");
+  },
+  frame: function () {
+    // The light walks the day so the shadows are never a still picture — the
+    // point of the game is that shade moves.
+    var t = (Date.now() % 12000) / 12000;
+    var d = sunDir(6 + t * 12);
+    var sun = scene.userData.sun;
+    var c = N * CELL / 2;
+    sun.position.set(c + d.x * 220, d.y * 220 + 20, c + d.z * 220);
+    sun.target.position.set(c, 0, c);
+  }
+};
+
+// ---------------------------------------------------------------- code box
+function wireCodeBox() {
+  var b = document.getElementById("codego");
+  if (!b) return;
+  b.onclick = function () {
+    var v = document.getElementById("codein").value;
+    var m = unpackMsg(v);
+    if (!m) { UI.hint("კოდი ვერ წავიკითხე. სცადე ხელახლა."); return; }
+    if (GAME && GAME.play) GAME.play(m);
+    document.getElementById("codein").value = "";
+  };
+}
+
+// ---------------------------------------------------------------- menu
+var GAME = null, pickG = "sun", pickN = "local";
+
+function paintPicks() {
+  document.querySelectorAll("#pickGame button").forEach(function (b) {
+    b.classList.toggle("on", b.dataset.g === pickG);
+  });
+  document.querySelectorAll("#pickNet button").forEach(function (b) {
+    b.classList.toggle("on", b.dataset.n === pickN);
+  });
+  var cfg = document.getElementById("netCfg");
+  if (pickN === "lan") {
+    // No room number to agree on any more: the host opens a room under a name
+    // and the joiner picks it off a list. A number typed on both sides was one
+    // more thing to get wrong across a classroom.
+    cfg.innerHTML =
+      '<div class="pick"><button data-r="host" class="on"><b>მასპინძელი</b>' +
+      '<span>ხსნი ოთახს. შენ გადაწყვეტ, ვინ შემოვა.</span></button>' +
+      '<button data-r="join"><b>შემოერთება</b><span>ირჩევ, ვის შემოუერთდე.</span></button></div>' +
+      (location.protocol === "file:"
+        ? '<p class="small">ეს გვერდი ფაილიდანაა გახსნილი, ქსელური თამაში კი სერვერს სჭირდება. ' +
+          'ტრენერმა უნდა გაუშვას <b>თამაშის-სერვერი.cmd</b> და ყველამ იმ მისამართით გახსნას.</p>'
+        : '<p class="small">მასპინძელი სახელით ჩანს სიაში. შემოერთებას ის რთავს ნებას.</p>');
+    cfg.querySelectorAll("[data-r]").forEach(function (b) {
+      b.onclick = function () {
+        cfg.querySelectorAll("[data-r]").forEach(function (q) { q.classList.remove("on"); });
+        b.classList.add("on");
+      };
+    });
+  } else if (pickN === "code") {
+    cfg.innerHTML = '<p class="small">ერთი იწყებს, სვლის შემდეგ კოდს კარნახობს; მეორე ჩასვამს ' +
+      'და პასუხს აბრუნებს. ქსელი არ სჭირდება.</p>' +
+      '<div class="pick"><button data-r="host" class="on"><b>პირველი</b><span>შენ იწყებ.</span></button>' +
+      '<button data-r="join"><b>მეორე</b><span>პასუხობ.</span></button></div>';
+    cfg.querySelectorAll("[data-r]").forEach(function (b) {
+      b.onclick = function () {
+        cfg.querySelectorAll("[data-r]").forEach(function (q) { q.classList.remove("on"); });
+        b.classList.add("on");
+      };
+    });
+  } else {
+    cfg.innerHTML = '<p class="small">ორივე ერთ ლეპტოპზე, რიგრიგობით. თაგვს ერთმანეთს გადასცემთ.</p>';
+  }
+}
+
+// One game lives here now. The three that were once also on this page —
+// ტელეფონი, დუელი and თაროზე ნაკლული — were block-grid versions, and they have
+// been rebuilt inside bekura3d.html itself so they use the real modelling tools.
+// They are NOT kept here as well: two games with the same name in two different
+// files is how somebody opens the old one and reasonably concludes nothing was
+// ever done.
+var GAMES = { sun: SunDuel };
+var BOARDN = { sun: N };
+
+// The menu hands over to the lobby for a network game and straight to the board
+// otherwise. beginGame is the one door into play, so a game never starts
+// half-configured no matter which way the players got here.
+function beginGame(g, seat) {
+  document.getElementById("menu").style.display = "none";
+  LOBBY.close();
+  if (GAME && GAME.stop) GAME.stop();
+  GAME = GAMES[g] || SunDuel;
+  NET.me = seat;
+  NET.onmsg = function (m) { if (GAME && GAME.play) GAME.play(m); };
+  UI.who(({ local: "ადგილობრივი", code: "კოდი", lan: "ქსელი" }[NET.mode]) +
+         (NET.mode === "local" ? "" :
+          (" · " + (seat === 0 ? "მასპინძელი" : "შემოერთებული") +
+           (LOBBY.name ? " · " + LOBBY.name : ""))));
+  orbit.tx = orbit.tz = (BOARDN[g] || N) * CELL / 2;
+  orbit.r = g === "sun" ? 190 : (g === "shelf" ? 260 : 150);
+  GAME.init();
+}
+
+function startGame() {
+  var nameEl = document.getElementById("myname");
+  var myName = (nameEl.value || "").trim();
+  NET.stop();
+  if (pickN === "lan") {
+    if (!myName) { nameEl.focus(); nameEl.placeholder = "სახელი აუცილებელია"; return; }
+    if (location.protocol === "file:") {
+      nameEl.placeholder = "ჯერ თამაშის-სერვერი.cmd უნდა გაუშვათ";
+      return;
+    }
+    var hostBtn = document.querySelector("#netCfg [data-r].on");
+    var isHost = !hostBtn || hostBtn.dataset.r === "host";
+    LOBBY.name = myName;
+    if (isHost) LOBBY.host(myName, pickG); else LOBBY.browse(myName);
+    return;
+  }
+  var codeHost = document.querySelector("#netCfg [data-r].on");
+  var seat = (pickN === "code" && codeHost && codeHost.dataset.r === "join") ? 1 : 0;
+  LOBBY.name = myName;
+  NET.start({ mode: pickN, host: seat === 0, room: "1" },
+            function (m) { if (GAME && GAME.play) GAME.play(m); });
+  beginGame(pickG, seat);
+}
+
+// ---------------------------------------------------------------- self test
+// The parts worth testing are the ones with no pixels in them: does shade fall
+// where it should, does a drawing lose exactly what a drawing loses, does a code
+// survive the trip. The rendering is checked by looking at it.
+function selftest() {
+  var out = [], fails = 0;
+  function want(label, got, exp) {
+    var ok = got === exp;
+    if (!ok) fails++;
+    out.push((ok ? "PASS  " : "FAIL  ") + label + "  (got " + got + ", want " + exp + ")");
+  }
+  // a point with nothing near it is lit whenever the sun is up
+  want("open ground is lit at noon",
+       litAt(new THREE.Vector3(40, 1.5, 40), 12, []) ? "lit" : "dark", "lit");
+  // a tall tower immediately west shades the point in the morning
+  var west = [{ x: 3, z: 5, h: 6 }];
+  var pt = new THREE.Vector3(4 * CELL + 4, 1.5, 5 * CELL + 4);
+  want("a tower to the east blocks the morning sun",
+       litAt(pt, 8, west) ? "lit" : "dark", "dark");
+  want("and the same point is clear at noon",
+       litAt(pt, 12, west) ? "lit" : "dark", "lit");
+  want("a one storey shed does not reach the same point at noon",
+       litAt(pt, 12, [{ x: 3, z: 5, h: 1 }]) ? "lit" : "dark", "lit");
+
+
+  var el2 = document.getElementById("out");
+  el2.style.display = "block";
+  el2.textContent = "===BEGIN===\n" + out.join("\n") +
+    "\n" + (out.length - fails) + "/" + out.length + " passed\n===END===";
+}
+
+// ---------------------------------------------------------------- boot
+initGL();
+document.querySelectorAll("#pickGame button").forEach(function (b) {
+  b.onclick = function () { pickG = b.dataset.g; paintPicks(); };
+});
+document.querySelectorAll("#pickNet button").forEach(function (b) {
+  b.onclick = function () { pickN = b.dataset.n; paintPicks(); };
+});
+document.getElementById("start").onclick = startGame;
+document.getElementById("lobBack").onclick = function () {
+  LOBBY.close();
+  NET.stop();
+  document.getElementById("menu").style.display = "";
+};
+paintPicks();
+if (/[?&]selftest=1/.test(location.search)) selftest();
+</script>
+</body>
+</html>
