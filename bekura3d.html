@@ -1155,7 +1155,7 @@ var SITERING = null;
 // Which commit this bundle was built from. A pure function of HEAD, never the
 // clock, so rebuilding without a new commit still reproduces the file byte for
 // byte. Null when built outside a checkout.
-var BUILD = {"c":"fb7c683","d":"2026-09-08"};
+var BUILD = {"c":"47157c0","d":"2026-09-08"};
 
 // Working areas that SHIP with the tool, one ring per town, from data/sites.json.
 // A trainer draws the district once with the ტერიტორია tool, the ring is baked
@@ -12507,7 +12507,17 @@ if (/[?&]debug=1/.test(location.search)) {
                       axisById: axisById, schLocalQuat: schLocalQuat,
                       updateGizmo: updateGizmo, citySubVerts: citySubVerts,
                       SIM: SIM, setSim: setSim, simLanes: simLanes,
-                      simBuild: simBuild, simFrame: simFrame, carRoot: carRoot };
+                      simBuild: simBuild, simFrame: simFrame, carRoot: carRoot,
+                      // The championship client decides whether a child is
+                      // pulled out of what they are doing, so it is worth being
+                      // able to drive it from outside without a class of thirty.
+                      //
+                      // Read through a function, as `camera` above is: this
+                      // object is built long before `var CHAMP` is assigned, and
+                      // naming it directly here would capture the undefined it
+                      // holds at this point rather than the state it ends up as.
+                      CHAMP: function () { return CHAMP; },
+                      champApply: champApply, champSettled: champSettled };
 }
 
 // ?selftest=1 asserts pan direction. Panning is grab-the-world: the ground must
@@ -13999,6 +14009,114 @@ if (/[?&]selftest=1/.test(location.search)) {
   flush();
 }
 
+// ---------------------------------------------------------------- championship
+// A class championship, from a pupil's side.
+//
+// Everything about who plays whom is decided on the server. This end asks "am I
+// wanted?" every few seconds and does as it is told: there is no lobby to walk
+// through and nothing to press, because the trainer starts it and the class
+// simply arrives. Free play is untouched — a child who opens ფაილი ▸ თამაში on
+// their own still gets the rooms they always did.
+//
+// Absent offline. NET is the online build's network object; a laptop with no
+// server has no class to hold a championship for, and none of this ever starts.
+var CHAMP = { tick: null, room: null, joined: false, doneAt: 0 };
+
+// A round is over for this child but their score is still on screen. Six seconds
+// is long enough to read "მოიგე · 68%" and short enough that the class does not
+// drift apart while everyone stares at their own number.
+var CHAMP_LINGER = 6000;
+
+// Nothing is taken off the screen until it has been read: a round still being
+// played is never interrupted, and a finished one is left up long enough to see.
+function champSettled() {
+  if (!SC.game.on) return true;
+  if (SC.game.phase !== "done") return false;
+  if (!CHAMP.doneAt) { CHAMP.doneAt = Date.now(); return false; }
+  return Date.now() - CHAMP.doneAt >= CHAMP_LINGER;
+}
+
+// Back to the plan that was being worked on, whether that is because the child
+// is out or because the trainer stopped the whole thing.
+function champBackToWork() {
+  CHAMP.room = null; CHAMP.joined = false; CHAMP.doneAt = 0;
+  if (SC.game.on) gameExit();
+  else { if (GNET.on) GNET.stop(); gameCloseChooser(); }
+}
+
+// The wait between rounds. Deliberately without a way out: a championship is not
+// something a child opts into halfway through, so backing out of this screen
+// would only ever mean missing the round it is about to hand them.
+function champWaitScreen(d) {
+  var left = Math.max(0, (d.lives || 2) - (d.losses || 0));
+  gpScreen("ᲩᲔᲛᲞᲘᲝᲜᲐᲢᲘ",
+    "რაუნდი <b>" + (d.round || 1) + "</b> · <b>" + (d.wins || 0) + "</b> მოგება, <b>" +
+    (d.losses || 0) + "</b> წაგება · დაგრჩა <b>" + left + "</b> ცდა",
+    '<button disabled style="opacity:.6;cursor:default"><b>დაელოდე შემდეგ წყვილს</b><span>' +
+    (d.pending ? "<b>" + d.pending + "</b> წყვილი ჯერ თამაშობს. " : "") +
+    "როგორც კი რაუნდი დასრულდება, შენი შემდეგი თამაში თვითონ დაიწყება." +
+    "</span></button>", false);
+  document.getElementById("gpback").style.display = "none";
+}
+
+function champApply(d) {
+  // Null is "could not ask", which is not the same as "nothing running". A blink
+  // in the tunnel must not throw a child out of a round they are in the middle
+  // of, so no news means no change.
+  if (!d || !d.state) return;
+
+  if (d.state === "match") {
+    if (CHAMP.room === d.room) return;              // already in this one
+    CHAMP.room = d.room; CHAMP.joined = true; CHAMP.doneAt = 0;
+    gameCloseChooser();
+    if (GNET.on) GNET.stop();                       // whatever they were in, this outranks it
+    SC.game.netRoom = d.room;
+    // The seat came from the server, which paired it. Seat 0 hosts, exactly as
+    // it does when two children open a room between themselves.
+    GNET.open(d.room, d.seat === 0, gameNetMsg, d.seat);
+    gameEnter(d.game);
+    document.getElementById("hint").innerHTML =
+      "ჩემპიონატი · რაუნდი <b>" + (d.round || 1) + "</b> — მოწინააღმდეგე <b>" +
+      gesc(d.opponent || "") + "</b>";
+    return;
+  }
+
+  if (d.state === "waiting") {
+    CHAMP.joined = true;
+    if (!champSettled()) return;
+    if (CHAMP.room) {                               // the round they just played is over
+      CHAMP.room = null; CHAMP.doneAt = 0;
+      if (SC.game.on) gameExit();
+      else if (GNET.on) GNET.stop();
+    }
+    champWaitScreen(d);
+    return;
+  }
+
+  // Out on lives, or the trainer ended it. Either way the answer is the same:
+  // give them their own work back. Only for somebody who was actually in it —
+  // "idle" is what every pupil outside a championship reads, all lesson.
+  if (!CHAMP.joined) return;
+  if (!champSettled()) return;
+
+  var place = d.state === "out" ? d.place : null;
+  champBackToWork();
+  document.getElementById("hint").innerHTML = place
+    ? "<b>ჩემპიონატი დასრულდა შენთვის</b> — " + place +
+      "-ე ადგილი. დაუბრუნდი შენს ნამუშევარს."
+    : "<b>ჩემპიონატი დასრულდა.</b> დაუბრუნდი შენს ნამუშევარს.";
+}
+
+function champStart() {
+  if (!NET || typeof NET.champ !== "function" || CHAMP.tick) return;
+  var poll = function () {
+    if (NET.dead && NET.dead()) return;             // signed out: nothing to ask for
+    NET.champ().then(champApply).catch(function () {});
+  };
+  poll();
+  CHAMP.tick = setInterval(poll, 4000);
+}
+
 // The online build (bekura3d_online) serves this same file behind a login and
 // keeps each child's work on the server. It needs one thing the offline build
 // does not: a way to read the current state from outside this closure. Handing
@@ -14027,6 +14145,10 @@ if (window.BEKURA3D_SYNC && typeof window.BEKURA3D_SYNC.attach === "function") {
   }
   catch (e) { /* a sync that cannot start must never stop the lesson */ }
 }
+
+// Same condition, same reason: online only, and a failure here must never be
+// the thing that stops a lesson.
+try { champStart(); } catch (e) {}
 
 })();
 </script>
