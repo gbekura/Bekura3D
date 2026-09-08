@@ -2018,6 +2018,18 @@ renderer.domElement.addEventListener("pointerdown", function (ev) {
   renderer.domElement.setPointerCapture(ev.pointerId);
   if (!isCity()) { schPointerDown(ev); return; }
 
+  // Shift+drag pans, except on a move handle with a face selected, where it
+  // extrudes. The same narrow exception schPointerDown makes, and it has to sit
+  // above the pan branch: that branch claims every Shift press and returns, so
+  // the gizmo was never asked and the gesture did nothing here at all. Narrowed
+  // to exactly this case, so panning is unchanged everywhere else — including
+  // Shift over a gizmo with a whole object selected.
+  if (ev.button === 0 && ev.shiftKey && state.cgiz === "move" &&
+      state.subSel && state.subSel.type === "face") {
+    var cgh = vgizPick(ev);
+    if (cgh && vgizStart(ev, cgh.object)) { hideCtxMenu(); return; }
+  }
+
   if (ev.button === 2 || ev.button === 1 || ev.shiftKey) {
     // Where the right button went down, so the menu can tell a click from an
     // orbit. The studio has kept this on SC all along; the city never did, and
@@ -2842,6 +2854,14 @@ function vgizStart(ev, hitObj) {
             // would let a change of mind mid-gesture move a different set.
             verts: t.sub ? t.sub.verts.slice() : null,
             subC: t.sub ? t.sub.c.slice() : null,
+            // 3ds Max, and the same gesture the studio already has: Shift on a
+            // move handle turns the drag into an extrude. Only armed here --
+            // pressing Shift and clicking without dragging must add nothing and
+            // cost no undo step. One face only: extruding the primary while
+            // dragging a whole set would pull unrelated geometry with it.
+            wantExtrude: !!(ev.shiftKey && t.sub && state.subSel &&
+                            state.subSel.type === "face" && citySubSels().length === 1 &&
+                            (hit.kind === "move" || hit.kind === "moveplane")),
             hint0: document.getElementById("hint").innerHTML };
 
   if (hit.kind === "rotate") {
@@ -2903,16 +2923,41 @@ function subLevelName(type) {
 // the vertical preserves length and never mixes y in. Nothing has to be rotated
 // back out of the world except a free drag across the ground plane.
 function vgizSubMove(ev, d, sh) {
-  var S = state.snap, out = "", verts = d.verts, i;
+  var S = state.snap, out = "", i;
   var rs = Math.sin(sh.rot || 0), rc = Math.cos(sh.rot || 0);
+
+  // Below the threshold the drag has changed nothing, so a Shift+click that
+  // never travels leaves the shape exactly as it was. schExtrude at distance 0
+  // puts the new face on top of the old one and repoints F[i] at it, so the
+  // rest of this function moves the new face without knowing anything happened.
+  if (d.wantExtrude) {
+    var travelled = d.kind === "moveplane"
+      ? (function () { var p = planePoint(ev, d.origin, d.axis);
+                       return p ? p.distanceTo(d.p0) : 0; })()
+      : Math.abs(schAxisPoint(ev, d.origin, d.axis) - d.t0);
+    if (travelled < 0.25) return;
+    d.wantExtrude = false;
+    schExtrude(sh, state.subSel.index, 0);
+    d.verts = subVerts(sh, state.subSel);      // the new face, not the old one
+    cityRegeom(sh);
+    cityRefreshSubHelpers();
+  }
+  var verts = d.verts;
 
   if (d.kind === "move") {
     var raw = schAxisPoint(ev, d.origin, d.axis) - d.t0, want = raw;
     if (S.on) want = snapTo(want, S.move);
     var step = want - d.applied;
     if (step) {
-      var q = VSUBAX[d.axisId];
-      for (i = 0; i < verts.length; i++) sh.V[verts[i]][q] += step;
+      // Straight off the axis vector rather than a component index, because the
+      // rail's axes are not the vertex's: ღერძი Y is world -Z, so adding the drag to
+      // component 2 moved the face the opposite way to the arrow being pulled.
+      // The vector carries the sign, and cannot be got the wrong way round.
+      var A = axisById(d.axisId).v;
+      for (i = 0; i < verts.length; i++) {
+        var v = sh.V[verts[i]];
+        v[0] += A.x * step; v[1] += A.y * step; v[2] += A.z * step;
+      }
       d.applied = want;
     }
     out = d.axisId.toUpperCase() + "  " + (want >= 0 ? "+" : "") + want.toFixed(1) + " მ";
