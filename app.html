@@ -2521,16 +2521,55 @@ function cityCentroid(it) {
   return { x: sx / it.pts.length, z: sz / it.pts.length };
 }
 
+// Every vertex the current sub-object selection touches, listed once each. A
+// face and one of its own edges can both be in the set, so the union matters.
+function citySubVerts(sh) {
+  var seen = {}, out = [];
+  citySubSels().forEach(function (s) {
+    subVerts(sh, s).forEach(function (vi) {
+      if (!seen[vi]) { seen[vi] = 1; out.push(vi); }
+    });
+  });
+  return out;
+}
+// Where that selection sits, in the world — which is where its arrows go.
+function citySubCentroid(sh, verts) {
+  var c = [0, 0, 0];
+  for (var i = 0; i < verts.length; i++)
+    for (var q = 0; q < 3; q++) c[q] += sh.V[verts[i]][q] / verts.length;
+  return { l: c, w: cityL2W(sh, c) };
+}
+
 // What the gizmo is pointing at: an armed corner if there is one, otherwise the
 // whole selected object. A corner only ever moves, so the mode is forced there.
 function cgizTarget() {
   if (!isCity()) return null;
-  // In a sub-object level the drag is direct — grab the face and pull. Leaving
-  // the object gizmo up would put three arrows over the very faces being aimed at.
-  if (state.sub !== "object") return null;
+  // A sub-object level used to put up no gizmo at all: the drag was direct --
+  // grab the face and pull. That is still how a click on the mesh behaves, but
+  // it leaves no way to pull a face along one axis, and no way to size or turn a
+  // set of vertices at all. So the arrows stand here too, at the centre of
+  // whatever is selected; a click that misses them drags the element directly,
+  // exactly as before.
+  if (state.sub !== "object") {
+    var ssh = citySubShape();
+    if (!ssh || !state.subSel) return null;
+    var sv = citySubVerts(ssh);
+    if (!sv.length) return null;
+    var sc = citySubCentroid(ssh, sv);
+    return { it: ssh, corner: null, mode: state.cgiz, o: [sc.w.x, sc.w.z],
+             // The selection has a height of its own — the top face of a mass is
+             // not on the ground under it — so the gizmo is placed at the point
+             // itself rather than at terrain level.
+             oy: sc.w.y, many: false, ids: [ssh.id], lift: 0,
+             // A vertex lives in the shape's own frame, so its arrows do too:
+             // pulling "X" on a turned mass runs along that mass's side, which
+             // is the only reading of the arrow that matches what is drawn.
+             rot: ssh.rot || 0, srot: ssh.rot || 0,
+             sub: { id: ssh.id, verts: sv, c: sc.l } };
+  }
   var pt = selPointArea();
   if (pt) return { it: pt, corner: state.selPt, mode: "move",
-                   o: pt.pts[state.selPt], rot: 0 };
+                   o: pt.pts[state.selPt], rot: 0, srot: 0 };
   if (state.selected == null) return null;
   var it = findItem(state.selected);
   if (!it) return null;
@@ -2542,7 +2581,13 @@ function cgizTarget() {
            lift: many ? 0 : liftOf(it),
            // A set has no single angle to align the size arrows to, so they stay
            // on the world axes; one object still gets arrows along its own sides.
-           rot: (!many && it.kind === "zone") ? (it.rot || 0) : 0 };
+           rot: (!many && it.kind === "zone") ? (it.rot || 0) : 0,
+           // Size is always measured on the object's own sides, whatever the
+           // move arrows do. A mass turned 30° and scaled on the world axes
+           // shears in the eye even though cityScale is doing the right thing to
+           // its vertices: the arrow simply is not pointing where the growth
+           // happens. A set still has no single angle, so it keeps the world.
+           srot: many ? 0 : (it.rot || 0) };
 }
 
 // How far above the ground this object sits. Masses and primitives are dropped
@@ -2720,14 +2765,28 @@ function cityMeasure(it) {
   return Math.round(pathLength(it)).toLocaleString() + " მ · " + it.width + " მ სიგანე";
 }
 
+// Where the arrows stand. A whole object is gripped from just above the ground
+// it sits on; a sub-object selection from the point itself, which is why the
+// target may carry its own height.
+function cgizOrigin(t) {
+  return new THREE.Vector3(
+    t.o[0],
+    t.oy != null ? t.oy : terrainAt(t.o[0], t.o[1]) + 2 + (t.lift || 0),
+    t.o[1]);
+}
+
 function updateVGizmo() {
   var t = cgizTarget();
   if (!t) { VGIZ.root.visible = false; return; }
   vgizBuild();
-  var o = new THREE.Vector3(t.o[0], terrainAt(t.o[0], t.o[1]) + 2 + (t.lift || 0), t.o[1]);
+  var o = cgizOrigin(t);
   VGIZ.root.visible = true;
   VGIZ.root.position.copy(o);
   VGIZ.root.rotation.y = t.rot;        // so the size arrows follow a turned mass
+  // ...and the size arrows follow it even where the move arrows do not, so the
+  // scale group carries whatever angle is left over. For a zone the two are the
+  // same and this is zero; for a mass it is the whole of the mass's angle.
+  VGIZ.parts.scale.rotation.y = (t.srot || 0) - t.rot;
   ["move", "rotate", "scale"].forEach(function (k) {
     VGIZ.parts[k].visible = k === t.mode;
   });
@@ -2760,13 +2819,19 @@ function vgizStart(ev, hitObj) {
   // vertical arrow is refused there rather than silently doing nothing.
   if (t.corner != null && hit.axis === "z") return false;
   // Nor can an area or a path be lifted: they are draped over the terrain.
-  if (hit.axis === "z" && !t.many && !canLift(t.it)) return false;
-  var origin = new THREE.Vector3(t.o[0], terrainAt(t.o[0], t.o[1]) + 2 + (t.lift || 0), t.o[1]);
+  // A sub-object selection is exempt: its vertical arrow raises the vertices
+  // themselves, which is not the object's lift and is always allowed.
+  if (hit.axis === "z" && !t.many && !t.sub && !canLift(t.it)) return false;
+  var origin = cgizOrigin(t);
   var YUP = new THREE.Vector3(0, 1, 0);
   var d = { kind: hit.kind, id: t.it.id, corner: t.corner, origin: origin,
             // A corner drag is always about one point, whatever else is selected.
             many: !!t.many && t.corner == null, ids: t.ids || [],
             pivot: { x: origin.x, z: origin.z },
+            // Carried for the whole drag: re-reading the selection every frame
+            // would let a change of mind mid-gesture move a different set.
+            verts: t.sub ? t.sub.verts.slice() : null,
+            subC: t.sub ? t.sub.c.slice() : null,
             hint0: document.getElementById("hint").innerHTML };
 
   if (hit.kind === "rotate") {
@@ -2792,8 +2857,14 @@ function vgizStart(ev, hitObj) {
     // the gizmo is turned with the mass, so the handle's world direction is too.
     // The vertical is the axis it turns about, so rotating it is a no-op — but
     // applying the rotation to it anyway would drift it off vertical.
+    //
+    // Size uses the object's own angle rather than the gizmo's: the two differ
+    // for a mass, whose move arrows stay on the world axes while its sides do
+    // not. Measuring the drag along the wrong one of the two makes the object
+    // grow at a rate that does not match the pointer.
+    var turn = hit.kind === "scale" ? (t.srot || 0) : t.rot;
     d.axis = d.vertical ? YUP.clone()
-                        : axisById(hit.axis).v.clone().applyAxisAngle(YUP, t.rot);
+                        : axisById(hit.axis).v.clone().applyAxisAngle(YUP, turn);
     d.t0 = schAxisPoint(ev, origin, d.axis);
     d.applied = 0; d.appliedK = 1;
   }
@@ -2801,11 +2872,131 @@ function vgizStart(ev, hitObj) {
   return true;
 }
 
+// Which component of a local vertex each arrow drives. The rail names the two
+// ground axes x and y and the vertical z, the Z-up naming the whole app uses,
+// while a vertex is stored [x, y, z] with y up. cityScale maps them the same
+// way; this is that same table, named.
+var VSUBAX = { x: 0, y: 2, z: 1 };
+
+// "წახნაგი", "წიბო", "წვერო" — the level's own name, for the readout.
+function subLevelName(type) {
+  var m = SUBMODES.filter(function (s) { return s.id === type; })[0];
+  return m ? m.ka : "";
+}
+
+// One pointermove of a sub-object gizmo drag: move, size or turn the selected
+// vertices inside the shape's own frame.
+//
+// The gizmo is turned with the shape, so the arrow marked X *is* the shape's X.
+// That is what makes this simple: a distance measured along the arrow in the
+// world is the same distance along one vertex component, because a turn about
+// the vertical preserves length and never mixes y in. Nothing has to be rotated
+// back out of the world except a free drag across the ground plane.
+function vgizSubMove(ev, d, sh) {
+  var S = state.snap, out = "", verts = d.verts, i;
+  var rs = Math.sin(sh.rot || 0), rc = Math.cos(sh.rot || 0);
+
+  if (d.kind === "move") {
+    var raw = schAxisPoint(ev, d.origin, d.axis) - d.t0, want = raw;
+    if (S.on) want = snapTo(want, S.move);
+    var step = want - d.applied;
+    if (step) {
+      var q = VSUBAX[d.axisId];
+      for (i = 0; i < verts.length; i++) sh.V[verts[i]][q] += step;
+      d.applied = want;
+    }
+    out = d.axisId.toUpperCase() + "  " + (want >= 0 ? "+" : "") + want.toFixed(1) + " მ";
+
+  } else if (d.kind === "moveplane") {
+    var p = planePoint(ev, d.origin, d.axis);
+    if (!p) return;
+    var ax = p.x - d.p0.x, az = p.z - d.p0.z;
+    if (S.on) { ax = snapTo(ax, S.move); az = snapTo(az, S.move); }
+    // The free drag arrives in world metres; the vertices are local, so the
+    // shape's angle comes back out of it. Same rotation cityW2L applies, on a
+    // delta rather than a point.
+    var lx = ax * rc - az * rs, lz = ax * rs + az * rc;
+    var px = d.appliedX * rc - d.appliedZ * rs, pz = d.appliedX * rs + d.appliedZ * rc;
+    for (i = 0; i < verts.length; i++) {
+      sh.V[verts[i]][0] += lx - px;
+      sh.V[verts[i]][2] += lz - pz;
+    }
+    d.appliedX = ax; d.appliedZ = az;
+    out = "X " + (ax >= 0 ? "+" : "") + ax.toFixed(1) +
+          "   Z " + (az >= 0 ? "+" : "") + az.toFixed(1) + " მ";
+
+  } else if (d.kind === "rotate") {
+    var a = gizAngle(ev, d.origin, d.axis);
+    if (a === null) return;
+    var st = a - d.a0;
+    while (st > Math.PI) st -= Math.PI * 2;
+    while (st < -Math.PI) st += Math.PI * 2;
+    d.a0 = a; d.total += st;
+    var wantA = S.on ? snapTo(d.total, S.rot * Math.PI / 180) : d.total;
+    var da = wantA - d.applied;
+    if (da) {
+      // About the vertical through the selection's own centre, which is the one
+      // axis the city turns anything about.
+      var s = Math.sin(da), c = Math.cos(da), cx = d.subC[0], cz = d.subC[2];
+      for (i = 0; i < verts.length; i++) {
+        var v = sh.V[verts[i]], dx = v[0] - cx, dz = v[2] - cz;
+        v[0] = cx + dx * c + dz * s;
+        v[2] = cz - dx * s + dz * c;
+      }
+      d.applied = wantA;
+    }
+    out = (d.applied * 180 / Math.PI).toFixed(0) + "°";
+
+  } else {                                       // scale, one axis or uniform
+    var totalK;
+    if (d.kind === "scaleuni") {
+      totalK = Math.exp((d.screenY0 - ev.clientY) * 0.006);
+    } else {
+      var den = d.t0;
+      if (Math.abs(den) < 0.4) den = den < 0 ? -0.4 : 0.4;
+      totalK = schAxisPoint(ev, d.origin, d.axis) / den;
+    }
+    if (!isFinite(totalK)) return;
+    totalK = Math.max(0.05, Math.min(20, totalK));
+    if (S.on) totalK = Math.max(S.scale, snapTo(totalK, S.scale));
+    var k = totalK / d.appliedK;
+    if (Math.abs(k - 1) < 1e-6) return;
+    // About the selection's centre, so a face grows where it stands instead of
+    // walking away from the shape it belongs to.
+    for (i = 0; i < verts.length; i++) {
+      var w = sh.V[verts[i]];
+      if (d.kind === "scaleuni") {
+        for (var q2 = 0; q2 < 3; q2++) w[q2] = d.subC[q2] + (w[q2] - d.subC[q2]) * k;
+      } else {
+        var qq = VSUBAX[d.axisId];
+        w[qq] = d.subC[qq] + (w[qq] - d.subC[qq]) * k;
+      }
+    }
+    d.appliedK = totalK;
+    out = (d.kind === "scaleuni" ? "" : d.axisId.toUpperCase() + "  ") +
+          "×" + totalK.toFixed(2);
+  }
+
+  cityRegeom(sh);
+  cityRefreshSubHelpers();
+  document.getElementById("hint").textContent =
+    out + "   ·   " + (state.subSel ? subLevelName(state.subSel.type) : "") +
+    " " + verts.length + " წვერო";
+}
+
 function vgizMove(ev) {
   var d = VGIZ.drag, it = findItem(d.id);
   if (!it) return;
   if (d.corner != null && (!it.pts || d.corner >= it.pts.length)) return;
   var S = state.snap, out = "";
+
+  // A sub-object drag edits the mesh, not the object's place in the city, so it
+  // goes nowhere near cityTranslate, cityScale or cityRotate.
+  if (d.verts) {
+    if (it.kind !== "shape") return;
+    vgizSubMove(ev, d, it);
+    return;
+  }
 
   if (d.kind === "move") {
     // Snap the resulting coordinate, not the drag delta: snapping the delta
@@ -9791,6 +9982,39 @@ function axisById(id) {
   for (var i = 0; i < AXES.length; i++) if (AXES[i].id === id) return AXES[i];
   return AXES[0];
 }
+
+// The frame a shape's own sides stand in.
+//
+// A studio shape has no matrix: schXform bakes every turn straight into the
+// vertices and keeps `rot` only as a record of what was turned. Each entry is
+// degrees about one of *the rail's* axes, not the world's — index 1 is ღერძი Y,
+// which is world -Z, and index 2 is Z, which is world up — so axisById is what
+// turns the record back into directions. Getting that wrong puts the size
+// arrows on the wrong two sides of every shape ever turned off the vertical.
+//
+// The record is exact whenever a single axis has been used, which is what
+// turning a building about the vertical is and very nearly all anyone does
+// here. With two or three recorded, the axes are composed in the order they are
+// listed, which need not be the order they were turned in: the arrows then
+// follow the same numbers the ბრუნვა boxes show rather than a matrix recovered
+// from the mesh, and one further turn about a single axis puts them back on the
+// sides. Nothing is written from this — it only aims the handles.
+var _lqID = new THREE.Quaternion();          // identity, never written to
+var _lqA = new THREE.Quaternion(), _lqB = new THREE.Quaternion(),
+    _lqOut = new THREE.Quaternion();
+function schLocalQuat(sh) {
+  var r = (sh && sh.rot) || null;
+  _lqOut.set(0, 0, 0, 1);
+  if (!r || (!r[0] && !r[1] && !r[2])) return _lqOut;
+  var D = Math.PI / 180;
+  for (var i = 0; i < 3; i++) {
+    if (!r[i]) continue;
+    _lqA.setFromAxisAngle(axisById(XYZL[i].toLowerCase()).v, r[i] * D);
+    _lqB.copy(_lqOut);
+    _lqOut.multiplyQuaternions(_lqA, _lqB);
+  }
+  return _lqOut;
+}
 var GIZ = { mode: "move", root: new THREE.Group(), parts: {}, drag: null };
 GIZ.root.visible = false;
 SC.scene.add(GIZ.root);
@@ -10026,6 +10250,16 @@ function updateGizmo() {
   GIZ.root.visible = true;
   var o = schSelPivot();
   GIZ.root.position.copy(o);
+  // Size is measured on the shape's own sides, not the world's. A mass turned
+  // 30° and pulled along world X grows along a diagonal of itself: the numbers
+  // are right and the shape still shears in the eye, because the arrow is not
+  // pointing where the growth happens. Move and turn stay on the world axes,
+  // which is where a plan is laid out. A set of shapes has no single angle
+  // between them, so it keeps the world axes too.
+  GIZ.parts.scale.quaternion.copy(
+    schSelIds().length > 1 && (SC.sub === "object" || !SC.subSel)
+      ? _lqID
+      : schLocalQuat(sh));
   var s = state.view === "plan"
     ? SC.orbit.planZoom * 0.30
     : camera.position.distanceTo(o) * 0.16;
@@ -10070,9 +10304,14 @@ function rotateVerts(sh, idx, axis, ang, c) {
 // "xyz" scales everything; otherwise only the component along that axis, so the
 // mapping stays correct now the presented axes are not the raw world ones.
 var _sv = new THREE.Vector3();
-function scaleVertsAxis(sh, idx, axisId, k, c) {
+// `dir` is the direction to grow along, when it is not the world axis the id
+// names: the gizmo passes the shape's own side there, so a turned mass grows
+// along itself. The typed ზომა boxes pass nothing and keep the world axis,
+// because the number in the box measures a world-aligned box (see schXform) and
+// growing along anything else would not move it.
+function scaleVertsAxis(sh, idx, axisId, k, c, dir) {
   var uniform = axisId === "xyz";
-  var a = uniform ? null : axisById(axisId).v;
+  var a = uniform ? null : (dir || axisById(axisId).v);
   for (var i = 0; i < idx.length; i++) {
     var m = idx[i];
     _sv.set(sh.V[m][0] + sh.pos[0] - c.x,
@@ -10117,6 +10356,13 @@ function gizmoStart(ev, hit) {
   var gids = schSelIds(), gmany = gids.length > 1 && (SC.sub === "object" || !SC.subSel);
   var origin = gmany ? schSelPivot() : selCentroid(sh);
   var axis = hit.axis === "xyz" ? new THREE.Vector3(0, 1, 0) : axisById(hit.axis).v.clone();
+  // The size arrows are drawn on the shape's own sides, so the drag has to be
+  // measured along the same side — otherwise the pointer and the growth run at
+  // different rates and the shape races the cursor. A set keeps the world axes,
+  // and so does the uniform box, which has no direction to speak of.
+  if (hit.kind === "scale" && hit.axis !== "xyz" && !gmany) {
+    axis.applyQuaternion(schLocalQuat(sh));
+  }
   var d = { kind: hit.kind, axisId: hit.axis, axis: axis, origin: origin,
             many: gmany, ids: gids,
             id: sh.id, idx: selVertIndices(sh),
@@ -10284,7 +10530,9 @@ function gizmoMove(ev) {
     if (Math.abs(k - 1) < 1e-6) return;
     var grew = gameEdit(gizShapes(d, sh), function () {
       if (d.many) schGroupScale(d.ids, d.axisId, k, d.origin);
-      else { scaleVertsAxis(sh, d.idx, d.axisId, k, d.origin); regeom(sh); }
+      // d.axis is already the shape's own side where there is one, so the
+      // growth follows the arrow that was grabbed.
+      else { scaleVertsAxis(sh, d.idx, d.axisId, k, d.origin, d.axis); regeom(sh); }
     }, true);
     if (grew) d.appliedK = totalK; else gameBlocked();
     SC.gizReadout = (d.axisId === "xyz" ? "" : d.axisId.toUpperCase() + "  ") +
@@ -11986,7 +12234,15 @@ if (/[?&]debug=1/.test(location.search)) {
                       clipCount: clipCount, doCopy: doCopy, doPaste: doPaste,
                       pBox: pBox, schFind: schFind, findItem: findItem,
                       makePrim: makePrim, shapeToCSG: shapeToCSG, csgToShape: csgToShape,
-                      faceNormal: faceNormal, orientFaces: orientFaces };
+                      faceNormal: faceNormal, orientFaces: orientFaces,
+                      // The city's gizmo, which had no way in at all: GIZ was
+                      // reachable and VGIZ was not, so nothing outside could
+                      // tell whether the ქალაქი arrows were even up, let alone
+                      // which way they pointed.
+                      VGIZ: VGIZ, cgizTarget: cgizTarget, updateVGizmo: updateVGizmo,
+                      setCityGiz: setCityGiz, setCitySub: setCitySub,
+                      axisById: axisById, schLocalQuat: schLocalQuat,
+                      updateGizmo: updateGizmo, citySubVerts: citySubVerts };
 }
 
 // ?selftest=1 asserts pan direction. Panning is grab-the-world: the ground must
