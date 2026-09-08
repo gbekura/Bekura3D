@@ -250,6 +250,16 @@
         border:1px solid rgba(255,255,255,.4)}
   #ctxmenu button.on .dot{background:var(--cyan);border-color:var(--cyan)}
   .dcap{font-size:11.5px;color:rgba(255,255,255,.45);margin:-2px 0 8px}
+  /* The result of a game, said once and plainly. A percentage in a row of other
+     rows is a number a child has to interpret; this is the answer to the only
+     question they are actually asking. */
+  .gmres{margin:2px 0 10px;padding:13px 12px;border-radius:10px;text-align:center;
+        font-size:23px;font-weight:700;letter-spacing:.5px;line-height:1.2}
+  .gmres span{display:block;font-size:12.5px;font-weight:400;letter-spacing:0;
+        margin-top:5px;opacity:.85}
+  .gmres.win{background:rgba(140,203,145,.2);border:1px solid var(--green);color:#dff2e1}
+  .gmres.lose{background:rgba(228,115,107,.16);border:1px solid #E4736B;color:#ffdedb}
+  .gmres.draw{background:rgba(84,163,218,.18);border:1px solid var(--sky);color:#dceaf7}
   #ctxmenu .sk{margin-left:auto;color:rgba(255,255,255,.32);font-size:11px;
         font-family:Consolas,monospace}
   #ctxmenu hr{border:0;border-top:1px solid rgba(255,255,255,.12);margin:4px 2px}
@@ -2280,8 +2290,17 @@ renderer.domElement.addEventListener("wheel", function (ev) {
   hideCtxMenu();                     // the scene is about to move out from under it
   var f = Math.pow(1.0016, ev.deltaY);
   if (!isCity()) {
-    if (state.view === "3d") SC.orbit.dist = Math.max(25, Math.min(900, SC.orbit.dist * f));
-    else SC.orbit.planZoom = Math.max(12, Math.min(400, SC.orbit.planZoom * f));
+    // The far limits match ქალაქი's. They used to stop at 900 and 400, which is
+    // barely wider than the plot: a student who nudged a shape out into the
+    // distance could not zoom out far enough to find it again, and the სკანი tab
+    // could not be seen whole. Both cameras are shared with the city and their
+    // far plane is 8000, so this costs nothing.
+    //
+    // The near limits stay tighter than the city's (25 against 60, 12 against
+    // 40): this is where modelling actually happens, and getting close to a
+    // face is the point.
+    if (state.view === "3d") SC.orbit.dist = Math.max(25, Math.min(3800, SC.orbit.dist * f));
+    else SC.orbit.planZoom = Math.max(12, Math.min(1600, SC.orbit.planZoom * f));
     return;
   }
   if (state.view === "3d") orbit.dist = Math.max(60, Math.min(3800, orbit.dist * f));
@@ -5589,6 +5608,11 @@ var GNET = {
   _poll: function () {
     var self = this;
     if (!this.on) return;
+    // Online: the session has gone. Without this the move log is asked for four
+    // times a second by a page that is no longer signed in, for as long as the
+    // laptop stays open — which a classroom's worth of stale tabs turns into a
+    // server doing nothing but answering 401s.
+    if (NET && NET.dead && NET.dead()) { this.stop(); return; }
     (NET ? NET.events(this.room, this._since)
          : fetch(this.url("/r/" + encodeURIComponent(this.room) + "?since=" + this._since))
              .then(function (r) { return r.json(); }))
@@ -5676,20 +5700,40 @@ function gesc(s) {
 // between two of those steps. 60 sits between them, and it means roughly three
 // quarters of the real volume in common.
 //
-// It was measured against rebuilds, not guessed: a mass a fifth too small in
-// one dimension scores 78 and passes; four blocks with one missing scores 67 and
-// passes; the same model with its tower mirrored to the other end scores 53 and
-// fails, which is right, because a mirrored building is exactly the mistake a
-// plan and an elevation are supposed to catch. 80 would admit almost nothing but
-// an exact rebuild, and 50 would let the mirror through.
-var GAMEWIN = 60;
+// Measured against real rebuilds, not guessed. At R = 18: a mass a fifth too
+// narrow scores 78, a third too narrow scores 56, and one built at twice the
+// height scores 44.
+//
+// The line sat at 60 to make "a third too narrow" a loss, on the argument that a
+// plan and an elevation are supposed to catch exactly that. It sits at 50 now
+// because these are eleven-year-olds and the first thing a game has to do is be
+// winnable: a child who rebuilds a building recognisably and is still told they
+// failed stops playing. 56 passing is the point of the change, not a side
+// effect. Gross errors still fail — double the height is 44, and an empty plot
+// is 0 — so the threshold still means something.
+var GAMEWIN = 50;
+// How long each half of a simultaneous round lasts. Without a deadline the pair
+// moves at the speed of whoever is slowest, and one child spends the lesson
+// watching a waiting screen — which is the thing these games were rearranged to
+// stop. When the time runs out the round goes on with whatever is on the board:
+// an unfinished model still scores, and an unanswered shelf simply counts as not
+// found.
+var DUOBUILD = 60;      // seconds to build the model
+var DUOANSWER = 120;    // seconds to rebuild it from memory, or to pick the piece
+// "The time ran out and nothing was chosen", as a shelf position. Deliberately
+// past the end of the shelf: every `picked >= 0` test still reads it as answered
+// and reveals the shelf, and no `picked === humanAt` can ever match it, so it
+// counts as wrong without a second sentinel to thread through five places.
+var DECOYNOANSWER = 99;
 var GAMEDEF = {
   tel:    { ka: "გეგმის ტელეფონი", sub: "ხედავს გეგმას და ფასადს",
-            long: "ერთი აშენებს. მეორეს მხოლოდ ნახაზი მიუვა — გეგმა ზემოდან და ფასადი სამხრეთიდან — და უნდა გაიმეოროს. რასაც ნახაზი კარგავს, სწორედ ის არის გაკვეთილი. დამთხვევა 60%-დან ზემოთ — მოგება." },
+            long: "ერთი აშენებს. მეორეს მხოლოდ ნახაზი მიუვა — გეგმა ზემოდან და ფასადი სამხრეთიდან — და უნდა გაიმეოროს. რასაც ნახაზი კარგავს, სწორედ ის არის გაკვეთილი. დამთხვევა 50%-დან ზემოთ — მოგება." },
   shadow: { ka: "ჩრდილების გეგმა", sub: "ხედავს მხოლოდ ზემოდან — სიმაღლე ჩრდილშია",
-            long: "იგივე, ოღონდ ფასადის გარეშე: მხოლოდ ხედი ზემოდან, ჩრდილებით. გეგმა სიმაღლეს არ ამბობს — ჩრდილი ამბობს. 35°-ზე ჩრდილი 1,4-ჯერ გრძელია, ვიდრე თვითონ მოცულობა. ზღვარი აქაც 60%-ია." },
+            long: "იგივე, ოღონდ ფასადის გარეშე: მხოლოდ ხედი ზემოდან, ჩრდილებით. გეგმა სიმაღლეს არ ამბობს — ჩრდილი ამბობს. 35°-ზე ჩრდილი 1,4-ჯერ გრძელია, ვიდრე თვითონ მოცულობა. ზღვარი აქაც 50%-ია." },
+  duele:  { ka: "მოდელირების დუელი — მარტივი", sub: "მოდელი ჩანს, მაგრამ ვერ შეეხები",
+            long: "იგივე დუელი, ოღონდ მეხსიერების გარეშე: მეორის მოდელი გამჭვირვალედ დგას შენს ნაკვეთზე და იქვე რჩება. ვერ მონიშნავ, ვერ გაანძრევ, ვერ წაშლი — მხოლოდ მის გარშემო და მის ზემოდან აშენებ. აქ ხელსაწყოს სწავლობ, არა დამახსოვრებას. ზღვარი 50%-ია." },
   duel:   { ka: "მოდელირების დუელი", sub: "ხედავს 15 წამს, მერე მეხსიერებით",
-            long: "ერთი წუთი აშენებ რთულს. მეორე 15 წამს ათვალიერებს სამგანზომილებაში — მერე მოდელი ქრება და მეხსიერებით უნდა გაიმეოროს. მერე იცვლით ადგილებს. ზღვარი აქაც 60%-ია, ოღონდ ნახაზის გარეშე." },
+            long: "ერთი წუთი აშენებ რთულს. მეორე 15 წამს ათვალიერებს სამგანზომილებაში — მერე მოდელი ქრება და მეხსიერებით უნდა გაიმეოროს. მერე იცვლით ადგილებს. ზღვარი აქაც 50%-ია, ოღონდ ნახაზის გარეშე." },
   decoy:  { ka: "თაროზე ნაკლული", sub: "ერთი ადგილი ცარიელია — შენ ავსებ, ის ცნობს",
             long: "თაროზე ხუთი ნამუშევარია: ოთხი პროგრამამ ააშენა, ერთი — შენ. მეორემ უნდა გამოიცნოს, რომელია ადამიანის. პროცენტი აქ არ ითვლება: გამოიცნო — მისი მოგებაა; ვერ გამოიცნო — შენი. ამიტომ ღირს ისე აშენება, თითქოს არ აგიშენებია." },
   sun:    { ka: "მზის დუელი", sub: "წაართვი მეზობელს მზე, შენსას შეინარჩუნე",
@@ -5697,6 +5741,24 @@ var GAMEDEF = {
 };
 // The state itself is declared with the rest of SC further down — this file runs
 // top to bottom and SC does not exist yet up here.
+
+// The one thing a child is actually waiting to be told. Every game says it the
+// same way and in the same place, because "72%" is a number they have to
+// interpret and "მოიგე" is not.
+//   won === true  → won      false → lost      null → drawn
+function gameVerdict(won, sub) {
+  var cls  = won === null ? "draw" : won ? "win" : "lose";
+  var word = won === null ? "ᲤᲠᲔ" : won ? "ᲛᲝᲘᲒᲔ!" : "ᲬᲐᲐᲒᲔ";
+  return '<div class="gmres ' + cls + '">' + word +
+         (sub ? '<span>' + sub + '</span>' : '') + '</div>';
+}
+// The same answer for the hint strip along the bottom, where a child who never
+// looks at the right-hand panel will still see it.
+function gameVerdictHint(won, sub) {
+  var col  = won === null ? "var(--sky)" : won ? "var(--green)" : "#E4736B";
+  var word = won === null ? "ფრე." : won ? "მოიგე!" : "წააგე.";
+  return '<b style="color:' + col + '">' + word + '</b> ' + (sub || "");
+}
 
 function gameClock(secs, onEnd) {
   var G = SC.game;
@@ -5715,19 +5777,45 @@ function gameClock(secs, onEnd) {
 function gameModel() { return JSON.parse(JSON.stringify(schItems())); }
 function gameClearBoard() {
   schItems().length = 0;
+  // The ghost belongs to a phase, not to the board: whoever puts it up puts it
+  // up again. Leaving it would haunt the next round.
+  schClearGhost();
   SC.sel = null; SC.selMore = []; SC.subSel = null; SC.subMore = [];
   schRebuild();
 }
 // Hand the model over. The drawings are made HERE, from the finished model, and
 // what the other player gets depends on the game: two drawings, one drawing, or
 // fifteen seconds of the thing itself.
-function gameSend() {
+// The building half of a simultaneous round, on the clock. Whatever is standing
+// when it runs out is what gets sent — an unfinished model still scores, and
+// scores honestly.
+function duoBuildClock() {
+  gameClock(DUOBUILD, function () {
+    if (SC.game.phase === "build" || SC.game.phase === "fill") {
+      document.getElementById("hint").innerHTML =
+        "<b>დრო ამოიწურა.</b> რაც ააშენე, ის იგზავნება.";
+      if (SC.game.id === "decoy") decoyShelve(true);
+      else gameSend(true);
+    }
+  });
+}
+// The answering half: rebuilding from memory, or picking the piece.
+function duoAnswerClock() {
+  gameClock(DUOANSWER, function () {
+    if (SC.game.phase === "copy") gameFinish();
+    else if (SC.game.phase === "guess") decoyGuess(DECOYNOANSWER);
+  });
+}
+
+// `auto` is the deadline firing rather than a child pressing: it sends whatever
+// is there instead of refusing, because refusing would strand the pair.
+function gameSend(auto) {
   var G = SC.game, items = gameModel();
-  if (!items.length) { document.getElementById("hint").textContent =
+  if (!items.length && !auto) { document.getElementById("hint").textContent =
       "ჯერ ააშენე რაღაც, მერე გაგზავნე."; return; }
   // The gizmo can push a shape past the line even though placing and dragging
   // cannot, so the plot is checked once more before anything is handed over.
-  var out = gameOutside();
+  var out = auto ? [] : gameOutside();
   if (out.length) {
     document.getElementById("hint").innerHTML =
       "<b>" + out.length + " ფიგურა ცისფერი ხაზის გარეთაა.</b> შემოიტანე შიგნით — " +
@@ -5735,6 +5823,27 @@ function gameSend() {
     schSelect(out[0].id, null);
     return;
   }
+  // ---- both at once ------------------------------------------------------
+  // Send mine and carry on. If theirs is already here the memorising starts now;
+  // if not, this child waits a moment instead of the whole build.
+  if (gameDuo()) {
+    G.shots = null;                       // the duel is memory, never a drawing
+    gameClock(0);                         // this child's building time is over
+    GNET.send({ t: "model", items: items, shots: null });
+    G.sent = true;
+    G.score = null;
+    gameClearBoard();
+    gameDrawPlot();
+    if (G.target) duoStudy();
+    else {
+      G.phase = "waitpeer";
+      document.getElementById("hint").innerHTML =
+        "<b>გაგზავნილია.</b> მეორეც ამთავრებს — დაელოდე.";
+    }
+    schRenderPanel();
+    return;
+  }
+
   G.target = items;
   G.score = null;
   if (GNET.on) {
@@ -5785,6 +5894,93 @@ function gameSend() {
     "<b>გაიმეორე ნახაზით.</b> მარჯვნივ ნახაზია — მოდელი აღარ ჩანს. იმავე ნაკვეთზე ააშენე.";
   schRenderPanel();
 }
+// The other player's model, put up for fifteen seconds and then taken away.
+// Shared by both sides of a simultaneous duel, and by whichever of them was
+// ready second.
+function duoStudy() {
+  var G = SC.game;
+  SC.sel = null; SC.selMore = []; SC.subSel = null; SC.subMore = []; SC.flatSel = null;
+  schDraftPts = []; schClearDraft();
+  setSchTool("select");
+  gameClearBoard();
+
+  // The easy duel does not take the model away. It stands there, seen through
+  // and untouchable, and the child builds against it — so the lesson is the
+  // tools rather than the memory.
+  if (G.id === "duele") {
+    G.phase = "copy";
+    schShowGhost(G.target);
+    document.getElementById("hint").innerHTML =
+      "<b>გაიმეორე გამჭვირვალე მოდელი.</b> ვერ შეეხები — შენსას მის ადგილას ააშენებ. " +
+      DUOANSWER + " წამი.";
+    duoAnswerClock();
+    schRenderPanel();
+    return;
+  }
+
+  G.phase = "study";
+  G.target.forEach(function (s) {
+    var c = JSON.parse(JSON.stringify(s));
+    c.id = SC.nextId++;
+    schItems().push(c);
+  });
+  schRebuild();
+  schRefreshHelpers();
+  document.getElementById("hint").innerHTML =
+    "<b>დაიმახსოვრე მეორის მოდელი.</b> მოატრიალე, დააკვირდი — 15 წამში გაქრება.";
+  gameClock(15, function () {
+    SC.game.phase = "copy";
+    gameClearBoard();
+    document.getElementById("hint").innerHTML =
+      "<b>ახლა გაიმეორე.</b> ორიგინალი აღარ ჩანს — " + DUOANSWER + " წამი გაქვს.";
+    duoAnswerClock();
+    schRenderPanel();
+  });
+  schRenderPanel();
+}
+
+// Who is playing, for the result screen. The names come from the room on the
+// server, not from anything the other client sends, so a child cannot put
+// somebody else's name on the board.
+function duoNames() {
+  if (!NET || !SC.game.netRoom) return;
+  NET.show(SC.game.netRoom).then(function (d) {
+    var me = gnetMe();
+    (d.players || []).forEach(function (p) {
+      if (p.seat === me) SC.game.myName = p.name;
+      else SC.game.peerName = p.name;
+    });
+    schRenderPanel();
+  }).catch(function () { /* the round plays fine without names */ });
+}
+function duoPeerName() { return SC.game.peerName || "მეორე"; }
+function duoMyName() { return SC.game.myName || "შენ"; }
+// The winner, named. null means a draw.
+function duoWinnerLine(won) {
+  if (won === null) return "ფრე — ვერავინ აჯობა";
+  return "გაიმარჯვა: <b>" + gesc(won ? duoMyName() : duoPeerName()) + "</b>";
+}
+
+// Both scores are in. Each child is told their own result first, because that is
+// the one they care about, and who won second.
+function duoFinish() {
+  var G = SC.game;
+  G.phase = "done";
+  gameClock(0);
+
+  var mine = G.score, theirs = G.peerScore;
+  var iPassed = mine >= GAMEWIN, theyPassed = theirs >= GAMEWIN;
+  // Both cleared the line, or neither did: the closer copy takes it.
+  var won = (iPassed === theyPassed) ? (mine === theirs ? null : mine > theirs) : iPassed;
+  G.won = won;
+
+  document.getElementById("hint").innerHTML = gameVerdictHint(won,
+    "შენ <b>" + mine + "%</b> · " + gesc(duoPeerName()) + " <b>" + theirs + "%</b> — " +
+    duoWinnerLine(won));
+  gameRecord(mine, won === null ? "draw" : won ? "win" : "lose");
+  schRenderPanel();
+}
+
 function gameFinish() {
   var G = SC.game;
   if (!G.target) return;
@@ -5792,10 +5988,25 @@ function gameFinish() {
   // model this size, and a rebuild that was visibly out still came back 100%.
   // 18 is about as fine as is worth paying for — it is R cubed, twice over.
   G.score = modelMatch(G.target, gameModel(), 18);
+
+  // Simultaneous: send my mark and wait for theirs, so the round ends with both
+  // numbers side by side rather than one child being told they "won" against a
+  // score nobody has seen.
+  if (gameDuo()) {
+    gameClock(0);                         // answering time is over either way
+    GNET.send({ t: "score", score: G.score });
+    if (G.peerScore !== null && G.peerScore !== undefined) { duoFinish(); return; }
+    G.phase = "waitscore";
+    document.getElementById("hint").innerHTML =
+      "<b>შენი დამთხვევა " + G.score + "%.</b> მეორეც ასრულებს — დაელოდე.";
+    schRenderPanel();
+    return;
+  }
+
   G.phase = "done";
   gameClock(0);
-  document.getElementById("hint").innerHTML = "დამთხვევა <b>" + G.score + "%</b> — " +
-    (G.score >= GAMEWIN ? "მოგებული." : "ზღვარი " + GAMEWIN + "%-ია.");
+  document.getElementById("hint").innerHTML = gameVerdictHint(G.score >= GAMEWIN,
+    "დამთხვევა <b>" + G.score + "%</b>, საჭიროა " + GAMEWIN + "%.");
   if (GNET.on) GNET.send({ t: "score", score: G.score });   // the builder wants to know
   // The copier is the one being tested, so the threshold is theirs to clear.
   gameRecord(G.score, G.score >= GAMEWIN ? "win" : "lose");
@@ -5827,6 +6038,12 @@ function gameReset() {
   var G = SC.game;
   gameClock(0);
   G.phase = "build"; G.target = null; G.shots = null; G.score = null;
+  // Both halves of a simultaneous round. A leftover here would make the next
+  // round think one side had already answered, and skip straight past a child.
+  G.sent = false; G.peerScore = null;
+  G.shelved = false; G.myPieces = null; G.myHumanAt = -1;
+  G.picked = -1; G.peerPicked = -1; G.pieces = null;
+  G.iFound = false; G.theyFound = false;
   gameClearBoard();
   // Two of the games are not an empty board with a brief: they have to be dealt.
   // Switching into either from the panel's own dropdown used to land on nothing
@@ -5836,8 +6053,14 @@ function gameReset() {
   if (G.id === "sun") sunSetup();
   else if (G.id === "decoy") decoySetup();
   else document.getElementById("hint").innerHTML =      // the brief gameEnter gives
-    "<b>" + GAMEDEF[G.id].ka + ".</b> ააშენე ცისფერი ხაზის შიგნით, მერე " +
-    "<b>გადაეცი მეორეს</b>.";
+    gameDuo()
+      ? "<b>" + GAMEDEF[G.id].ka + ".</b> ორივე ერთდროულად აშენებთ — " + DUOBUILD +
+        " წამი. როცა მზად იქნები — <b>გადაეცი მეორეს</b>."
+      : "<b>" + GAMEDEF[G.id].ka + ".</b> ააშენე ცისფერი ხაზის შიგნით, მერე " +
+        "<b>გადაეცი მეორეს</b>.";
+  // A fresh round gets a fresh minute on both machines: gameRoundAgain sends the
+  // reset, so the two clocks start within a poll of each other.
+  if (gameDuo()) duoBuildClock();
   gameDrawPlot();
   schRenderPanel();
 }
@@ -6383,6 +6606,12 @@ function gameEnter(id) {
   SC.game.phase = "build";
   SC.game.target = null; SC.game.shots = null; SC.game.score = null;
   SC.game.pieces = null; SC.game.pieceOf = null; SC.game.picked = -1;
+  // The simultaneous games keep both halves of the round: what I sent and what
+  // arrived, my answer and theirs. Cleared here so a second round starts clean.
+  SC.game.sent = false; SC.game.peerScore = null;
+  SC.game.shelved = false; SC.game.myPieces = null; SC.game.myHumanAt = -1;
+  SC.game.peerPicked = -1; SC.game.peerDone = false;
+  SC.game.myName = null; SC.game.peerName = null; SC.game.won = undefined;
   // setTab renders the panel on its way in, and the panel reads these, so they
   // have to exist before it runs rather than after the game's own setup.
   SC.game.towers = []; SC.game.turn = 0; SC.game.left = [3, 3];
@@ -6398,21 +6627,43 @@ function gameEnter(id) {
   else {
     gameFrame(0, 170, 47);           // the 90 m plot, plus a margin
     document.getElementById("hint").innerHTML =
-      "<b>" + GAMEDEF[SC.game.id].ka + ".</b> ააშენე ცისფერი ხაზის შიგნით, მერე " +
-      "<b>გადაეცი მეორეს</b>.";
+      gameDuo()
+      ? "<b>" + GAMEDEF[SC.game.id].ka + ".</b> ორივე ერთდროულად აშენებთ — " + DUOBUILD +
+        " წამი. როცა მზად იქნები — <b>გადაეცი მეორეს</b>. მერე ერთმანეთის მოდელს დაიმახსოვრებთ."
+      : "<b>" + GAMEDEF[SC.game.id].ka + ".</b> ააშენე ცისფერი ხაზის შიგნით, მერე " +
+        "<b>გადაეცი მეორეს</b>.";
   }
   // Only the games where one side builds and then hands over park the joiner on
   // a waiting screen. მზის დუელი alternates from the first move, so both players
-  // start on the board and sunClick decides whose turn it is.
-  if (GNET.on && !gameCanAct(0) && SC.game.id !== "sun")
-    gameWaitFor(SC.game.id === "decoy" ? "მეორე ავსებს ცარიელ ადგილს."
-                                       : "მეორე აშენებს — დაელოდე.");
+  // start on the board; and the simultaneous games start both children building
+  // at once, which is the whole point of them.
+  if (GNET.on && !gameCanAct(0) && SC.game.id !== "sun" && !gameDuo())
+    gameWaitFor("მეორე აშენებს — დაელოდე.");
+  // Both children are building against the same minute, started at the same
+  // moment for both: the round entered here on each machine when the second
+  // player joined.
+  if (gameDuo()) { duoBuildClock(); duoNames(); }
   gameDrawPlot();
   schRenderPanel();
 }
 // Which side of a two-player game may act right now. Hot seat: always this one,
 // because both players are at this keyboard. Networked: only the named role.
 function gameCanAct(role) { return !GNET.on || GNET.me === role; }
+// The two games where both players do the same thing at the same time instead of
+// taking turns: everyone builds, then everyone is tested on what the other made.
+// Half the lesson used to be one child watching another build.
+//
+// Networked only. Hot seat cannot work this way — one keyboard, two children —
+// so it keeps the hand-over, and every branch below leaves that path alone.
+//
+// The messages did not have to change at all: "here is my model" and "here is my
+// answer" were already symmetric. Only the state machine assumed a turn order.
+function gameDuo() {
+  var id = SC.game.id;
+  return GNET.on && (id === "duel" || id === "duele" || id === "decoy");
+}
+// Both halves of a simultaneous round are in: mine and theirs.
+function duoReady(mine, theirs) { return mine && theirs; }
 // The turn belongs to the other laptop. Nothing to build, nothing to press.
 function gameWaitFor(msg) {
   SC.game.phase = "wait";
@@ -6426,6 +6677,17 @@ function gameWaitFor(msg) {
 function gameNetMsg(m) {
   var G = SC.game;
   if (m.t === "model") {                    // the builder's model, and its drawings
+    // Simultaneous: theirs may land while this child is still building their
+    // own. Keep it and say so quietly; the round moves on when they hand theirs
+    // over, or when their minute runs out.
+    if (gameDuo()) {
+      G.target = m.items;
+      if (G.sent) duoStudy();
+      else document.getElementById("hint").innerHTML =
+        "<b>მეორემ დაასრულა.</b> შენ კიდევ გაქვს დრო — მერე <b>გადაეცი მეორეს</b>.";
+      schRenderPanel();
+      return;
+    }
     G.target = m.items; G.shots = m.shots || null; G.score = null;
     gameClearBoard();
     gameDrawPlot();
@@ -6454,10 +6716,18 @@ function gameNetMsg(m) {
     return;
   }
   if (m.t === "score") {                    // the copier's result, back to the builder
+    if (gameDuo()) {
+      G.peerScore = m.score;
+      if (G.score !== null && G.score !== undefined) duoFinish();
+      else schRenderPanel();               // still rebuilding; the panel shows it landed
+      return;
+    }
     G.score = m.score; G.phase = "done";
     gameClock(0);
-    document.getElementById("hint").innerHTML = "დამთხვევა <b>" + G.score + "%</b> — " +
-      (G.score >= GAMEWIN ? "მოგებული." : "ზღვარი " + GAMEWIN + "%-ია.");
+    // The builder's side of the same round: the other player clearing the
+    // threshold is a point against this one, so the verdict is inverted.
+    document.getElementById("hint").innerHTML = gameVerdictHint(G.score < GAMEWIN,
+      "მეორემ " + G.score + "% დაამთხვია, საჭირო იყო " + GAMEWIN + "%.");
     // Mirrored: this is the builder's copy of the same round, and a rebuild that
     // cleared the threshold is a point to the other side.
     gameRecord(m.score, m.score >= GAMEWIN ? "lose" : "win");
@@ -6465,6 +6735,21 @@ function gameNetMsg(m) {
     return;
   }
   if (m.t === "shelf") {                    // the decoy shelf, dealt by the builder
+    if (gameDuo()) {
+      G.pieces = m.pieces; G.humanAt = m.humanAt;
+      if (G.shelved) {
+        G.phase = "guess"; G.picked = -1;
+        decoyDrawShelf();
+        duoAnswerClock();
+        document.getElementById("hint").innerHTML =
+          "<b>რომელია მეორის ნახელავი?</b> დააწკაპუნე მასზე — " + DUOANSWER + " წამი.";
+      } else {
+        document.getElementById("hint").innerHTML =
+          "<b>მეორემ თარო დადგა.</b> შენ კიდევ გაქვს დრო — <b>თაროზე დადება</b>.";
+      }
+      schRenderPanel();
+      return;
+    }
     G.pieces = m.pieces; G.humanAt = m.humanAt; G.picked = -1; G.phase = "guess";
     decoyDrawShelf();
     document.getElementById("hint").innerHTML = gameCanAct(1)
@@ -6473,7 +6758,16 @@ function gameNetMsg(m) {
     schRenderPanel();
     return;
   }
-  if (m.t === "guess") { decoyReveal(m.i); return; }
+  if (m.t === "guess") {
+    if (gameDuo()) {
+      G.peerPicked = m.i;                  // their answer, about MY shelf
+      if (G.picked >= 0) duoDecoyFinish();
+      else schRenderPanel();               // still choosing; the panel notes it landed
+      return;
+    }
+    decoyReveal(m.i);
+    return;
+  }
   if (m.t === "sun") { sunPlay(m.x, m.z, m.h, m.p, true); return; }
   if (m.t === "reset") { gameRoundAgain(true); return; }
   if (m.t === "bye") {
@@ -6483,6 +6777,7 @@ function gameNetMsg(m) {
 }
 function gameExit() {
   gameClock(0);
+  schClearGhost();
   if (GNET.on) { GNET.send({ t: "bye" }); GNET.stop(); }
   if (NET && SC.game.netRoom) { NET.leave(SC.game.netRoom); SC.game.netRoom = null; }
   SC.game.on = false;
@@ -6511,6 +6806,7 @@ var GAMEPLOT = {
   tel:    { hx: 45, hz: 45, h: 90 },
   shadow: { hx: 45, hz: 45, h: 90 },
   duel:   { hx: 40, hz: 40, h: 80 },
+  duele:  { hx: 40, hz: 40, h: 80 },
   decoy:  { hx: 14, hz: 14, h: 34 },
   // The sun duel's plot IS its board: eighty metres square, six storeys tall.
   // The cyan cage is then the rule rather than a fence around it.
@@ -6534,7 +6830,11 @@ function gamePlot() {
 // make gamePlot() return null here and quietly switch the boundary off.
 function gameLocked() {
   if (state.tab !== "game") return false;      // phase is module state; lead with the tab
-  return SC.game.id === "duel" && SC.game.phase === "study";
+  var p = SC.game.phase;
+  // Waiting for the other child. Whatever is built now is thrown away the moment
+  // their half lands, so letting them build into it only loses the work.
+  if (p === "waitpeer" || p === "waitscore" || p === "waitguess") return true;
+  return SC.game.id === "duel" && p === "study";
 }
 // მზის დუელი's board is the game's own record drawn out — pedestals, gardens and
 // towers the program placed — never a model to edit. sunClick keeps the left
@@ -6940,12 +7240,12 @@ function gameOnScreen(half) {
   }
   return true;
 }
-function decoyShelve() {
+function decoyShelve(auto) {
   var G = SC.game;
   var mine = schItems().filter(function (s) { return s.gmMine; });
-  if (!mine.length) { document.getElementById("hint").textContent =
+  if (!mine.length && !auto) { document.getElementById("hint").textContent =
       "ჯერ ააშენე რაღაც ცისფერ კვარცხლბეკზე."; return; }
-  var strays = mine.filter(function (s) { return !gameInPlot(s); });
+  var strays = auto ? [] : mine.filter(function (s) { return !gameInPlot(s); });
   if (strays.length) {
     document.getElementById("hint").innerHTML =
       "<b>კვარცხლბეკიდან გადმოდის.</b> შემოიტანე ცისფერ ხაზში — თორემ თაროზე ვერ დადგება.";
@@ -6959,17 +7259,67 @@ function decoyShelve() {
   var slot = Math.floor(Math.random() * 5), pieces = G.demo.slice();
   pieces.splice(slot, 0, JSON.parse(JSON.stringify(mine)));
   decoyBankSave(mine);               // and it joins the company for later rounds
-  G.pieces = pieces; G.humanAt = slot; G.picked = -1; G.phase = "guess";
   // Hand the shelf over clean. A primitive still armed from the building half
   // would eat the first guess click and drop a stray shape on the shelf, and the
   // old selection points at shapes decoyDrawShelf is about to renumber.
   SC.sel = null; SC.selMore = []; SC.subSel = null; SC.subMore = [];
   SC.flatSel = null; setSchTool("select");
+
+  // ---- both at once ------------------------------------------------------
+  // My shelf is the one THEY have to solve, so it is kept apart. G.pieces is
+  // always the shelf on screen, which here is theirs.
+  if (gameDuo()) {
+    gameClock(0);                          // this child's filling time is over
+    G.myPieces = pieces; G.myHumanAt = slot; G.shelved = true;
+    GNET.send({ t: "shelf", pieces: pieces, humanAt: slot });
+    if (mine.length) decoyBankSave(mine);  // nothing built, nothing worth keeping
+    if (G.pieces) {                        // theirs already arrived
+      G.phase = "guess"; G.picked = -1;
+      decoyDrawShelf();
+      duoAnswerClock();
+      document.getElementById("hint").innerHTML =
+        "<b>რომელია მეორის ნახელავი?</b> დააწკაპუნე მასზე — " + DUOANSWER + " წამი.";
+    } else {
+      G.phase = "waitpeer";
+      gameClearBoard();
+      document.getElementById("hint").innerHTML =
+        "<b>თარო დადგმულია.</b> მეორეც ავსებს — დაელოდე.";
+    }
+    schRenderPanel();
+    return;
+  }
+
+  G.pieces = pieces; G.humanAt = slot; G.picked = -1; G.phase = "guess";
   if (GNET.on) GNET.send({ t: "shelf", pieces: pieces, humanAt: slot });
   decoyDrawShelf();
   document.getElementById("hint").innerHTML = gameCanAct(1)
     ? "<b>რომელია ახლა აშენებული?</b> დააწკაპუნე მასზე."
     : "<b>მეორე ცნობს.</b> დაელოდე.";
+  schRenderPanel();
+}
+
+// Both answers are in. Each child is told whether they found the other's piece,
+// and whether the other found theirs — the second half is the part they were
+// actually building for.
+function duoDecoyFinish() {
+  var G = SC.game;
+  G.phase = "done";
+  var iFound    = (G.picked === G.humanAt);          // I solved their shelf
+  var theyFound = (G.peerPicked === G.myHumanAt);    // they solved mine
+  // A point for finding, a point for hiding. Both or neither is a draw.
+  var me = (iFound ? 1 : 0) + (theyFound ? 0 : 1);
+  var them = (theyFound ? 1 : 0) + (iFound ? 0 : 1);
+  var won = me === them ? null : me > them;
+
+  G.iFound = iFound; G.theyFound = theyFound; G.won = won;
+  decoyDrawShelf();
+  document.getElementById("hint").innerHTML = gameVerdictHint(won,
+    (G.picked === DECOYNOANSWER ? "ვერ მოასწარი პასუხი."
+       : iFound ? "შენ იპოვე მისი." : "შენ ვერ იპოვე მისი.") + " " +
+    (G.peerPicked === DECOYNOANSWER ? "მან ვერ მოასწრო."
+       : theyFound ? "მან იპოვა შენი." : "მან ვერ იპოვა შენი.") + " " +
+    duoWinnerLine(won));
+  gameRecord(iFound ? 100 : 0, won === null ? "draw" : won ? "win" : "lose");
   schRenderPanel();
 }
 function decoyDrawShelf() {
@@ -7003,7 +7353,27 @@ function decoyDrawShelf() {
   gameDrawPlot();
 }
 function decoyGuess(i) {
-  if (SC.game.picked >= 0) return;
+  var G = SC.game;
+  if (G.picked >= 0) return;
+
+  // Simultaneous: both children answer, each about the other's shelf. Nothing is
+  // revealed until both have committed, or the slower one could be told the
+  // answer before they have chosen.
+  if (gameDuo()) {
+    if (G.phase !== "guess") return;
+    gameClock(0);                          // answered, or out of time
+    G.picked = i;
+    G.score = (i === G.humanAt) ? 100 : 0;
+    GNET.send({ t: "guess", i: i });
+    if (G.peerPicked >= 0) { duoDecoyFinish(); return; }
+    G.phase = "waitguess";
+    document.getElementById("hint").innerHTML = (i === DECOYNOANSWER)
+      ? "<b>დრო ამოიწურა.</b> მეორეც ირჩევს — დაელოდე."
+      : "<b>პასუხი მიღებულია.</b> მეორეც ირჩევს — დაელოდე.";
+    schRenderPanel();
+    return;
+  }
+
   if (!gameCanAct(1)) {                    // the builder does not get to answer
     document.getElementById("hint").textContent = "მეორე ცნობს — დაელოდე.";
     return;
@@ -7017,16 +7387,17 @@ function decoyReveal(i) {
   G.picked = i;
   G.score = (i === G.humanAt) ? 100 : 0;
   decoyDrawShelf();
-  document.getElementById("hint").innerHTML = (i === G.humanAt)
-    ? "<b>გამოიცანი.</b> მწვანე იყო ახლა აშენებული."
-    : "<b>ვერ გამოიცანი.</b> მწვანე იყო ახლა აშენებული.";
+  var guessedIt = (i === G.humanAt);
+  document.getElementById("hint").innerHTML = GNET.on
+    ? gameVerdictHint(guessedIt === (gnetMe() === 1), "მწვანე იყო ადამიანის ნახელავი.")
+    : "<b>" + (guessedIt ? "გამოიცანი." : "ვერ გამოიცანი.") +
+      "</b> მწვანე იყო ახლა აშენებული.";
   // Adversarial, as the brief says: the guesser wins by finding the human piece
   // and the builder by hiding it. Both laptops run this, each recording its own
   // side. Only the guesser has a percentage — the builder's result is the whole
   // of their score.
-  var guessed = (i === G.humanAt);
   gameRecord(gnetMe() === 1 ? G.score : null,
-             (guessed === (gnetMe() === 1)) ? "win" : "lose");
+             (guessedIt === (gnetMe() === 1)) ? "win" : "lose");
   schRenderPanel();
 }
 
@@ -7346,9 +7717,25 @@ function gamePanelHTML() {
   if (G.phase === "wait") {
     h += '<p class="empty">' + (G.waitMsg || "მეორის სვლაა.") + '</p>';
   } else if (G.phase === "build") {
-    h += '<p class="empty">' + GAMEDEF[G.id].sub + '. ააშენე, მერე გადაეცი. ' +
-         'მოგების ზღვარი — ' + GAMEWIN + '%.</p>' +
-         '<button class="mini" id="gmSend" style="width:100%;margin-bottom:6px">გადაეცი მეორეს</button>';
+    // Simultaneous: nothing is handed over, both are building at once. The button
+    // says so, and the panel says whether the other has already finished.
+    h += '<p class="empty">' + (gameDuo()
+          ? 'ორივე ერთდროულად აშენებთ — ' + DUOBUILD + ' წამი. მერე ერთმანეთის ' +
+            'მოდელს იმახსოვრებთ. ზღვარი — ' + GAMEWIN + '%.' +
+            (G.target ? ' <b style="color:var(--lime)">მეორემ უკვე დაასრულა.</b>' : '')
+          : GAMEDEF[G.id].sub + '. ააშენე, მერე გადაეცი. მოგების ზღვარი — ' + GAMEWIN + '%.') +
+         '</p>' +
+         (gameDuo() ? '<div class="row"><label>დარჩა</label><span class="val auto">' +
+                      G.secs + ' წმ</span></div>' : '') +
+         '<button class="mini" id="gmSend" style="width:100%;margin-bottom:6px">' +
+         'გადაეცი მეორეს</button>';
+  } else if (G.phase === "waitpeer") {
+    h += '<p class="empty">შენი მოდელი გაგზავნილია. მეორეც ამთავრებს — ' +
+         'როგორც კი დაასრულებს, ორივე დაიწყებთ დამახსოვრებას.</p>';
+  } else if (G.phase === "waitscore") {
+    h += '<div class="row"><label>შენი დამთხვევა</label><span class="val auto">' +
+         G.score + '%</span></div>' +
+         '<p class="empty">მეორეც ასრულებს. შედეგებს ერთად ნახავთ.</p>';
   } else if (G.phase === "study") {
     h += '<div class="row"><label>დარჩა</label><span class="val auto">' + G.secs + ' წმ</span></div>' +
          '<p class="empty">უყურე და დაიმახსოვრე.</p>';
@@ -7368,13 +7755,47 @@ function gamePanelHTML() {
     } else {
       h += '<p class="empty">ორიგინალი აღარ ჩანს. ააშენე მეხსიერებით.</p>';
     }
+    if (gameDuo())
+      h += '<div class="row"><label>დარჩა</label><span class="val auto">' +
+           G.secs + ' წმ</span></div>';
     h += '<button class="mini" id="gmDone" style="width:100%;margin-bottom:6px">მზადაა</button>';
   } else if (G.phase === "done") {
-    h += '<div class="row"><label>დამთხვევა</label><span class="val auto">' + G.score + '%</span></div>' +
+    // Simultaneous: both rebuilt something, so both have a mark and the round is
+    // decided by comparing them rather than by one number clearing a bar.
+    if (gameDuo()) {
+      var _mine = G.score, _theirs = G.peerScore;
+      var _ip = _mine >= GAMEWIN, _tp = _theirs >= GAMEWIN;
+      var _w = (_ip === _tp) ? (_mine === _theirs ? null : _mine > _theirs) : _ip;
+      h += gameVerdict(_w, (_w === null ? 'ფრე'
+                            : 'გაიმარჯვა ' + gesc(_w ? duoMyName() : duoPeerName())) +
+                           ' · ' + _mine + '% — ' + _theirs + '%') +
+           '<div class="row"><label>' + gesc(duoMyName()) + '</label><span class="val auto">' +
+             _mine + '%</span></div>' +
+           '<div class="row"><label>' + gesc(duoPeerName()) + '</label><span class="val auto">' +
+             _theirs + '%</span></div>' +
+           '<div class="row"><label>ზღვარი</label><span class="val auto">' + GAMEWIN + '%</span></div>' +
+           '<p class="empty">' + (_ip && _tp ? 'ორივემ გადააჭარბეთ — უფრო ზუსტმა მოიგო.'
+              : !_ip && !_tp ? 'ვერცერთმა მიაღწიე ზღვარს — უფრო ახლომ მოიგო.'
+              : 'ზღვარს მხოლოდ ერთმა მიაღწია.') + '</p>' +
+           '<button class="mini" id="gmAns" style="width:100%;margin-bottom:6px">ორიგინალის ჩვენება</button>' +
+           '<button class="mini" id="gmAgain" style="width:100%;margin-bottom:6px">კიდევ ერთხელ</button>';
+      h += '<button class="mini" id="gmOff" style="width:100%">თამაშის დასრულება</button></section>';
+      return h;
+    }
+
+    // Across a network the two players are looking at the same number from
+    // opposite sides: the one who rebuilt is being marked, the one who built is
+    // being beaten by that mark.
+    var _iCopied = !GNET.on || gameCanAct(1);
+    var _won = _iCopied ? (G.score >= GAMEWIN) : (G.score < GAMEWIN);
+    h += gameVerdict(_won, "დამთხვევა " + G.score + '% · საჭიროა ' + GAMEWIN + '%') +
+         '<div class="row"><label>დამთხვევა</label><span class="val auto">' + G.score + '%</span></div>' +
          '<div class="row"><label>ზღვარი</label><span class="val auto">' + GAMEWIN + '%</span></div>' +
-         '<p class="empty">' + (G.score >= 80 ? "ძალიან ახლოსაა — მოგებული."
-            : G.score >= GAMEWIN ? "საკმაოდ ახლოს — მოგებული."
-            : GAMEWIN + "%-ს ვერ მიაღწიე. ნახე ორიგინალი და შეადარე.") + '</p>' +
+         '<p class="empty">' + (!_iCopied
+            ? (_won ? "შენი მოდელი ვერ გაიმეორა." : "შენი მოდელი გაიმეორა.")
+            : G.score >= 80 ? "თითქმის ზუსტად გაიმეორე."
+            : G.score >= GAMEWIN ? "საკმაოდ ახლოს — ჩაითვალა."
+            : "ცოტა დააკლდა. ნახე ორიგინალი და შეადარე.") + '</p>' +
          '<button class="mini" id="gmAns" style="width:100%;margin-bottom:6px">ორიგინალის ჩვენება</button>';
   }
   h += '<button class="mini" id="gmOff" style="width:100%">თამაშის დასრულება</button></section>';
@@ -7388,8 +7809,41 @@ function decoyPanelHTML() {
          (GNET.host ? "მასპინძელი" : "სტუმარი") + '</span></div>';
   if (G.phase === "wait")
     h += '<p class="empty">' + (G.waitMsg || "მეორის სვლაა.") + '</p>';
+  else if (G.phase === "waitpeer")
+    h += '<p class="empty">შენი თარო დადგმულია. მეორეც ავსებს — როგორც კი ' +
+         'დაასრულებს, ერთმანეთის თაროებს გამოიცნობთ.</p>';
+  else if (G.phase === "waitguess")
+    h += '<p class="empty">შენი პასუხი მიღებულია. მეორეც ირჩევს — ' +
+         'შედეგებს ერთად ნახავთ.</p>';
+  else if (G.phase === "done" && gameDuo()) {
+    var _me = (G.iFound ? 1 : 0) + (G.theyFound ? 0 : 1);
+    var _them = (G.theyFound ? 1 : 0) + (G.iFound ? 0 : 1);
+    var _w2 = _me === _them ? null : _me > _them;
+    h += gameVerdict(_w2, (_w2 === null ? 'ფრე'
+                           : 'გაიმარჯვა ' + gesc(_w2 ? duoMyName() : duoPeerName())) +
+                          ' · ქულა ' + _me + ' — ' + _them) +
+         '<div class="row"><label>შენ იპოვე მისი</label><span class="val auto">' +
+         (G.iFound ? 'კი' : 'არა') + '</span></div>' +
+         '<div class="row"><label>' + gesc(duoPeerName()) + ' იპოვა შენი</label>' +
+         '<span class="val auto">' + (G.theyFound ? 'კი' : 'არა') + '</span></div>' +
+         '<p class="empty">ქულა ორ რამეში: იპოვე მისი, და დამალე შენი.</p>' +
+         '<button class="mini" id="gmAgain" style="width:100%;margin-bottom:6px">კიდევ ერთხელ</button>';
+  }
+  else if (G.phase === "guess" && G.picked < 0 && gameDuo())
+    h += '<div class="row"><label>დარჩა</label><span class="val auto">' +
+         G.secs + ' წმ</span></div>' +
+         '<p class="empty">ეს მეორის თაროა. რომელი ააშენა მან თვითონ? ' +
+         'დააწკაპუნე მასზე.' +
+         (G.peerPicked >= 0 ? ' <b style="color:var(--lime)">მან უკვე აირჩია.</b>' : '') +
+         '</p>';
   else if (G.phase === "guess" && G.picked < 0 && !gameCanAct(1))
     h += '<p class="empty">თარო დადგმულია. მეორე ცნობს — დაელოდე.</p>';
+  else if (G.phase === "fill" && gameDuo())
+    h += '<p class="empty">ცისფერი კვარცხლბეკი ცარიელია. ააშენე ისე, რომ ' +
+         'ოთხივე მეზობელს ჰგავდეს. ორივე ერთდროულად ავსებთ.' +
+         (G.pieces ? ' <b style="color:var(--lime)">მეორემ უკვე დადგა.</b>' : '') +
+         '</p>' +
+         '<button class="mini" id="gmShelve" style="width:100%;margin-bottom:6px">თაროზე დადება</button>';
   else if (G.phase === "fill" && !gameCanAct(0))
     h += '<p class="empty">მეორე ავსებს ცარიელ ადგილს — დაელოდე.</p>';
   else if (G.phase === "fill")
@@ -7399,11 +7853,16 @@ function decoyPanelHTML() {
   else if (G.phase === "guess" && G.picked < 0)
     h += '<p class="empty">რომელი ააშენა ახლა მეორემ? დააწკაპუნე მასზე. ' +
          'ფრთხილად — თაროზე ზოგჯერ ადრინდელი ნამუშევრებიც დგას.</p>';
-  else if (G.picked >= 0)
-    h += '<div class="row"><label>პასუხი</label><span class="val auto">' +
-         (G.picked === G.humanAt ? "გამოიცანი" : "ვერ გამოიცანი") + '</span></div>' +
-         '<p class="empty">მწვანე იყო ადამიანის ნახელავი.</p>' +
+  else if (G.picked >= 0) {
+    var _got = (G.picked === G.humanAt);
+    var _sub = "მწვანე იყო ადამიანის ნახელავი.";
+    // Adversarial: the guesser wins by finding it, the builder by hiding it.
+    h += (GNET.on
+            ? gameVerdict(_got === (gnetMe() === 1), _sub)
+            : '<div class="gmres ' + (_got ? "win" : "lose") + '">' +
+              (_got ? "ᲒᲐᲛᲝᲘᲪᲐᲜᲐ" : "ᲕᲔᲠ ᲒᲐᲛᲝᲘᲪᲐᲜᲐ") + '<span>' + _sub + '</span></div>') +
          '<button class="mini" id="gmAgain" style="width:100%;margin-bottom:6px">კიდევ ერთხელ</button>';
+  }
   h += '<button class="mini" id="gmOff" style="width:100%">თამაშის დასრულება</button></section>';
   return h;
 }
@@ -7444,10 +7903,23 @@ function sunPanelHTML() {
                             : "მეორის სვლაა — დაელოდე.")
       : "მოთამაშე " + (G.turn + 1) + "-ის სვლაა. დააწკაპუნე უჯრაზე.") + '</p>';
   h += '</section>';
-  if (G.done)
-    h += '<section><h3>ᲨᲔᲓᲔᲒᲘ</h3><p class="empty"><b>' +
-         (a === b ? "ფრე." : (a > b ? "ცისფერი ბაღი იგებს." : "ნარინჯისფერი ბაღი იგებს.")) +
-         '</b></p><button class="mini" id="gmAgainSun" style="width:100%;margin-bottom:6px">თავიდან</button></section>';
+  if (G.done) {
+    var _sub = SUNGARDENS[0].ka + ' ' + a + '% · ' + SUNGARDENS[1].ka + ' ' + b + '%';
+    var _banner;
+    if (GNET.on) {
+      // Across a network there is a "you", so say whether you won rather than
+      // which colour did and leave the child to work out which one they were.
+      var _me = gnetMe(), _mine = _me === 0 ? a : b, _theirs = _me === 0 ? b : a;
+      _banner = gameVerdict(_mine === _theirs ? null : _mine > _theirs, _sub);
+    } else {
+      // Hot seat: both players are at this keyboard, so name the garden.
+      _banner = '<div class="gmres ' + (a === b ? "draw" : "win") + '">' +
+                (a === b ? "ᲤᲠᲔ" : SUNGARDENS[a > b ? 0 : 1].ka + " ბაღი იგებს") +
+                '<span>' + _sub + '</span></div>';
+    }
+    h += '<section><h3>ᲨᲔᲓᲔᲒᲘ</h3>' + _banner +
+         '<button class="mini" id="gmAgainSun" style="width:100%;margin-bottom:6px">თავიდან</button></section>';
+  }
   h += '<section><button class="mini" id="gmOff" style="width:100%">თამაშის დასრულება</button></section>';
   return h;
 }
@@ -7903,11 +8375,17 @@ var SC = {
   // their own list and never reach the shape editor, the gizmo or the boolean.
   flat: { A: [], B: [] },
   flatSel: null,
-  flatGroup: new THREE.Group()
+  flatGroup: new THREE.Group(),
+  // The other player's model in მოდელირების დუელი მარტივი: shown through, and
+  // untouchable. Its own group on purpose — the studio raycast only ever tests
+  // SC.group, so nothing here can be clicked, selected, dragged or deleted, and
+  // schItems() never sees it, so it cannot be scored as the child's own work.
+  ghostGroup: new THREE.Group()
 };
 SC.scene.background = new THREE.Color(0x16253F);
 SC.scene.add(SC.group);
 SC.scene.add(SC.flatGroup);
+SC.scene.add(SC.ghostGroup);
 SC.scene.add(SC.helpers);
 
 // საბაზისო and სკოლა are separate documents — the same tools, different models.
@@ -8885,6 +9363,35 @@ function schRebuild() {
   schRefreshHelpers();
   placeHuman();
   schRenderPanel();
+}
+
+// Put the other player's model up to build on top of, at 30% and frozen. Not
+// added to schItems(): it must not be selectable, must not move, and above all
+// must not be counted as the child's own model when the copy is scored.
+function schShowGhost(items) {
+  schClearGhost();
+  (items || []).forEach(function (sh) {
+    var mesh = new THREE.Mesh(schBuildGeometry(sh), new THREE.MeshLambertMaterial({
+      color: 0x8CF0E0,
+      transparent: true,
+      opacity: 0.3,
+      // Drawn without writing depth, so the child's own solid shapes read
+      // clearly through it rather than fighting it for the same pixels.
+      depthWrite: false,
+      side: THREE.DoubleSide
+    }));
+    mesh.position.set(sh.pos[0], sh.pos[1], sh.pos[2]);
+    mesh.renderOrder = 3;
+    SC.ghostGroup.add(mesh);
+  });
+}
+function schClearGhost() {
+  for (var i = SC.ghostGroup.children.length - 1; i >= 0; i--) {
+    var m = SC.ghostGroup.children[i];
+    SC.ghostGroup.remove(m);
+    if (m.geometry) m.geometry.dispose();
+    if (m.material) m.material.dispose();
+  }
 }
 
 function schMeshFor(id) {
@@ -11465,6 +11972,12 @@ if (/[?&]debug=1/.test(location.search)) {
                       schDrawing: schDrawing, schPlanAndElevation: schPlanAndElevation,
                       schShadowPlan: schShadowPlan, sunVec: sunVec,
                       modelMatch: modelMatch, modelBox: modelBox,
+                      // The games, so a round can be driven end to end from
+                      // outside without synthesising pointer events at
+                      // projected screen coordinates.
+                      decoyGuess: decoyGuess, decoyShelve: decoyShelve,
+                      gameSend: gameSend, gameFinish: gameFinish,
+                      gameDuo: gameDuo, gameNetMsg: gameNetMsg,
                       citySubSels: citySubSels, citySubToggle: citySubToggle,
                       schRefreshHelpers: schRefreshHelpers,
                       cityRefreshSubHelpers: cityRefreshSubHelpers,
@@ -11779,13 +12292,18 @@ if (/[?&]selftest=1/.test(location.search)) {
     var p = pBox(w, h, d);
     return { id: -310, kind: "box", pos: [0, 0, 0], V: p.V, F: p.F };
   }
-  want("the winning line is sixty per cent", GAMEWIN, 60);
+  want("the winning line is fifty per cent", GAMEWIN, 50);
   want("a rebuild a fifth too narrow still wins",
        modelMatch([_sbox(34,12,22)], [_sbox(27,12,22)], 18) >= GAMEWIN ? "win" : "loss", "win");
-  want("but a third too narrow does not",
-       modelMatch([_sbox(34,12,22)], [_sbox(20,12,22)], 18) >= GAMEWIN ? "win" : "loss", "loss");
-  want("and twice the height certainly does not",
+  // 56, and the whole point of dropping the line from 60: a child who rebuilds a
+  // building recognisably has to be told they won, or they stop playing.
+  want("and so does one a third too narrow, which is why the line moved",
+       modelMatch([_sbox(34,12,22)], [_sbox(20,12,22)], 18) >= GAMEWIN ? "win" : "loss", "win");
+  // 44. A threshold that passed this would not be a threshold.
+  want("but twice the height still does not",
        modelMatch([_sbox(24,15,16)], [_sbox(24,30,16)], 18) >= GAMEWIN ? "win" : "loss", "loss");
+  want("and neither does an empty plot",
+       modelMatch([_sbox(24,15,16)], [], 18) >= GAMEWIN ? "win" : "loss", "loss");
   // a point plainly inside a box is inside, one plainly outside is not
   var bx0 = _mk("box", [0,0,0]);
   want("a point in the middle of a box is inside it",
@@ -12968,7 +13486,24 @@ if (/[?&]selftest=1/.test(location.search)) {
 //
 // Absent offline, where window.BEKURA3D_SYNC is undefined and this does nothing.
 if (window.BEKURA3D_SYNC && typeof window.BEKURA3D_SYNC.attach === "function") {
-  try { window.BEKURA3D_SYNC.attach({ fullPayload: fullPayload, nowStamp: nowStamp }); }
+  try {
+    window.BEKURA3D_SYNC.attach({
+      fullPayload: fullPayload,
+      nowStamp: nowStamp,
+      // Enough for the trainer's notes to hang in the right place: a point in the
+      // model projects onto the screen through the camera, and a click comes back
+      // the other way by raycasting the scene. All read-only — nothing handed out
+      // here can alter the model.
+      camera: function () { return camera; },
+      scene: scene,
+      canvas: renderer.domElement,
+      tab: function () { return state.tab; },
+      // Whether a round is in progress. The online build asks before reloading
+      // itself for a new version: dropping a child out of their room mid-game
+      // to install an update would be worse than running the old one.
+      gaming: function () { return !!SC.game.on; }
+    });
+  }
   catch (e) { /* a sync that cannot start must never stop the lesson */ }
 }
 
