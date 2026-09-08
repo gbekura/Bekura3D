@@ -481,6 +481,11 @@
     </div>
     <div class="spacer"></div>
     <button class="ghost on" id="ctxbtn">შენობები</button>
+    <!-- Scenery, not a tool: it shows what the widths a student typed actually
+         mean, and edits nothing. Lives beside შენობები because both are things
+         the ქალაქი view shows or hides rather than things it makes. -->
+    <button class="ghost" id="simbtn"
+            title="მანქანები 6 მ-ზე განიერ ქუჩებში — ყოველი 3 მ ერთი ზოლია">▶ მოძრაობა</button>
     <!-- Ctrl+Z reaches the page only when the focus is not in a field, and after
          typing in the panel it usually is. Two buttons work from anywhere, and
          they grey out when there is nothing left to undo, which the shortcut
@@ -1801,6 +1806,11 @@ function rebuild() {
   cityRefreshSubHelpers();     // the meshes are new, so the wireframe on them is stale
   renderLegend();
   renderProps();
+  // The traffic is laid out from the streets, so a street that has just been
+  // drawn, widened or deleted has to lay it out again. `SIM` is declared far
+  // below this and is merely undefined during the first rebuild at boot, which
+  // is what the first half of this test is for.
+  if (SIM && SIM.on) simBuild();
 }
 
 // Replace one area's mesh without touching the rest — dragging a corner would
@@ -3254,6 +3264,183 @@ function pathLength(it) {
   return L;
 }
 
+// ---------------------------------------------------------------- traffic
+// Cars driving the streets a student has drawn. It reads nothing but the width
+// they typed, which is the point: a 5 m lane stays empty, 6 m carries traffic
+// both ways, and every 3 m after that is one more lane. Drag the width slider
+// and the road fills up. That is a thing worth knowing about a street, and it
+// is much easier to see than to be told.
+//
+// Nothing here is saved and nothing here is edited: the cars are scenery over
+// the plan, cleared the moment the button goes off.
+var SIM_MIN_W  = 6;      // metres. Below this a street is a footpath.
+var SIM_LANE_W = 3;      // ...and every 3 m after the first lane pair is a lane.
+var SIM_LIFT   = 0.9;    // the ribbon's own lift, so a car sits on the tarmac
+var CAR_L = 4.2, CAR_W = 1.8, CAR_BODY_H = 0.8;
+var SIM_SPACING = 38;    // metres of road per car in a lane
+var SIM_MAX = 260;       // a whole town of streets must not cost the frame rate
+
+var carRoot = new THREE.Group();
+scene.add(carRoot);
+var SIM = { on: false, cars: [], last: 0 };
+var CAR_GEO = null;
+var CAR_COLS = [0xE5534B, 0x4A8FE5, 0xF2C14E, 0xE9E9E9, 0x7FC24A, 0x9B6BD6, 0x2F3B52];
+
+// How many lanes a street of this width carries. 6 m is two — one each way,
+// which is the narrowest thing two cars can pass on — and each further 3 m adds
+// one more.
+function simLanes(w) {
+  return (w >= SIM_MIN_W) ? Math.floor(w / SIM_LANE_W) : 0;
+}
+
+// The centreline as segments with their running distance, so a car can be
+// placed by how far along it is rather than by which corner it last passed.
+function simPathGeom(it) {
+  var pts = it.pts, seg = [], total = 0;
+  for (var i = 0; i < pts.length - 1; i++) {
+    var dx = pts[i + 1][0] - pts[i][0], dz = pts[i + 1][1] - pts[i][1];
+    var len = Math.sqrt(dx * dx + dz * dz);
+    if (len < 0.01) continue;
+    seg.push({ x: pts[i][0], z: pts[i][1], dx: dx / len, dz: dz / len, len: len, s0: total });
+    total += len;
+  }
+  return seg.length ? { seg: seg, total: total } : null;
+}
+
+// Where distance s along that centreline lands, and which way the road runs
+// there. A path is a handful of segments, so a scan is cheaper than a search.
+function simAt(g, s) {
+  var seg = g.seg, k = seg.length - 1;
+  for (var i = 0; i < seg.length; i++) {
+    if (s < seg[i].s0 + seg[i].len) { k = i; break; }
+  }
+  var e = seg[k], t = s - e.s0;
+  if (t < 0) t = 0; else if (t > e.len) t = e.len;
+  return { x: e.x + e.dx * t, z: e.z + e.dz * t, dx: e.dx, dz: e.dz };
+}
+
+// A body with a cabin set back on it, which is the least that reads as a car
+// rather than a brick — and at this size it is read from forty metres up.
+//
+// Both boxes are welded into one geometry rather than parented as two meshes:
+// a town of streets is a couple of hundred cars, and that is the difference
+// between one draw call each and two. mergeGeometries lives in an addon this
+// build does not carry, so the two vertex lists are simply laid end to end —
+// which is all that merging two untextured boxes amounts to.
+function carGeometry() {
+  var body = new THREE.BoxGeometry(CAR_W, CAR_BODY_H, CAR_L).toNonIndexed();
+  var cab  = new THREE.BoxGeometry(CAR_W * 0.86, 0.62, CAR_L * 0.46).toNonIndexed();
+  cab.translate(0, CAR_BODY_H / 2 + 0.3, -0.25);      // set back, towards the rear
+  var pos = [], nor = [];
+  [body, cab].forEach(function (part) {
+    var p = part.attributes.position.array, n = part.attributes.normal.array;
+    for (var i = 0; i < p.length; i++) { pos.push(p[i]); nor.push(n[i]); }
+    part.dispose();
+  });
+  var g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  return g;
+}
+
+function simClear() {
+  for (var i = carRoot.children.length - 1; i >= 0; i--) {
+    var m = carRoot.children[i];
+    carRoot.remove(m);
+    if (m.material) m.material.dispose();
+  }
+  SIM.cars = [];
+}
+
+function simBuild() {
+  simClear();
+  if (!SIM.on) return;
+  if (!CAR_GEO) CAR_GEO = carGeometry();
+  var roads = 0, lanes = 0;
+
+  items().forEach(function (it) {
+    if (it.kind !== "path") return;
+    var n = simLanes(it.width || 0);
+    if (!n) return;
+    var g = simPathGeom(it);
+    if (!g || g.total < 15) return;
+    roads++; lanes += n;
+
+    var lw = it.width / n;
+    for (var i = 0; i < n; i++) {
+      // Lanes are laid out across the width, +off to the left of the way the
+      // student drew the path.
+      var off = ((n - 1) / 2 - i) * lw;
+      // Right-hand traffic: a car keeps to the right of the centre it is
+      // travelling along. The lanes right of centre run the way the path was
+      // drawn; those left of it run back. On an odd count the middle lane
+      // drives forward, so a three-lane street is two out and one back.
+      var dir = off <= 0 ? 1 : -1;
+      var count = Math.max(1, Math.round(g.total / SIM_SPACING));
+      for (var c = 0; c < count; c++) {
+        if (SIM.cars.length >= SIM_MAX) return;
+        var mesh = new THREE.Mesh(CAR_GEO, new THREE.MeshLambertMaterial({
+          color: CAR_COLS[(SIM.cars.length + i) % CAR_COLS.length] }));
+        mesh.castShadow = true;
+        carRoot.add(mesh);
+        SIM.cars.push({
+          g: g, off: off, dir: dir, mesh: mesh,
+          // Spread along the road, then nudged, so a lane does not read as a
+          // train of cars all moving in lockstep.
+          u: (c + 0.35 * ((c * 7 + i * 3) % 3)) / count * g.total,
+          speed: 9 + ((c * 5 + i * 11) % 7)          // 9-15 m/s, about 30-55 km/h
+        });
+      }
+    }
+  });
+
+  SIM.built = { roads: roads, lanes: lanes, cars: SIM.cars.length };
+}
+
+function simFrame(now) {
+  if (!SIM.on || !SIM.cars.length) return;
+  var dt = SIM.last ? (now - SIM.last) / 1000 : 0;
+  SIM.last = now;
+  // A tab left in the background comes back with a huge gap. Stepping it would
+  // teleport every car; skipping it simply carries on from where they were.
+  if (!(dt > 0) || dt > 0.2) return;
+
+  for (var i = 0; i < SIM.cars.length; i++) {
+    var c = SIM.cars[i];
+    c.u += c.dir * c.speed * dt;
+    if (c.u >= c.g.total) c.u -= c.g.total;
+    else if (c.u < 0) c.u += c.g.total;
+    var p = simAt(c.g, c.u);
+    // Unit left of the drawn direction. The offset is measured against the path
+    // as drawn for both directions — a lane is where it is, whoever is in it.
+    var x = p.x + p.dz * c.off, z = p.z - p.dx * c.off;
+    c.mesh.position.set(x, terrainAt(x, z) + SIM_LIFT + CAR_BODY_H / 2, z);
+    // The body is built long along its own Z, so this points the nose the way
+    // the car is actually going rather than the way the path was drawn.
+    c.mesh.rotation.y = Math.atan2(p.dx * c.dir, p.dz * c.dir);
+  }
+}
+
+function setSim(on) {
+  SIM.on = !!on;
+  SIM.last = 0;
+  carRoot.visible = SIM.on;
+  if (SIM.on) simBuild(); else simClear();
+  var b = document.getElementById("simbtn");
+  if (b) b.classList.toggle("on", SIM.on);
+
+  var h = document.getElementById("hint");
+  if (!h) return;
+  if (!SIM.on) { h.textContent = ""; return; }
+  var s = SIM.built;
+  h.innerHTML = s && s.cars
+    ? "მოძრაობა: <b>" + s.roads + "</b> ქუჩა · <b>" + s.lanes + "</b> ზოლი · <b>" +
+      s.cars + "</b> მანქანა. " + SIM_MIN_W + " მ — ორი ზოლი, ყოველი დამატებული " +
+      SIM_LANE_W + " მ — კიდევ ერთი."
+    : "მანქანა ვერ დადის: ბილიკი " + SIM_MIN_W + " მ-ზე ვიწროა. " +
+      "მონიშნე ბილიკი და გაზარდე სიგანე.";
+}
+
 // A plain click replaces the set. Every existing caller means "this one object
 // and nothing else", so clearing selMore here is what keeps a stale group from
 // surviving a tab switch, a delete or a fresh draw.
@@ -3969,7 +4156,11 @@ function cityXformSet(it, key, ax, v) {
     if (ax === 0) it.w = v; else if (ax === 1) it.d = v; else it.h = v;
     return true;
   }
-  if (it.kind === "path" && ax === 2) { it.width = Math.max(3, Math.min(30, v)); return true; }
+  if (it.kind === "path" && ax === 2) {
+    it.width = Math.max(3, Math.min(30, v));
+    if (SIM.on) simBuild();          // a typed width can gain or lose a lane too
+    return true;
+  }
   var cur = cityXform(it).size[ax];
   if (!(cur > 0)) return false;
   if (ax === 2 && it.kind !== "shape") return false;   // only a mesh has a height to set
@@ -4150,6 +4341,10 @@ function renderPropsBody() {
       cityRegeom(it);
       markSelected(it.id);
       renderLegend();
+      // The whole point of the traffic button: widen the street a metre at a
+      // time and watch the lane appear at 6, and again at 9. rebuild() is out
+      // of reach here (see above), so the cars are laid out again on their own.
+      if (SIM.on) simBuild();
     };
     // one write when the drag ends, not one per frame
     document.getElementById("pw").onchange = function () { renderProps(); save(); };
@@ -5350,6 +5545,12 @@ document.getElementById("ctxbtn").addEventListener("click", function () {
   refreshContext(); save();
 });
 
+// Not saved: a plan reopened tomorrow should come back as a plan, not with the
+// traffic still running. No save() either — it changes nothing that is a plan.
+document.getElementById("simbtn").addEventListener("click", function () {
+  setSim(!SIM.on);
+});
+
 document.getElementById("undoBtn").addEventListener("click", function () { undo(); });
 document.getElementById("redoBtn").addEventListener("click", function () { redo(); });
 histButtons();                       // start greyed out: nothing has happened yet
@@ -5544,9 +5745,13 @@ function updateCamera() {
   camera = (state.view === "plan" || state.proj === "ortho") ? ortho : persp;
 }
 
-function tick() {
+function tick(now) {
   requestAnimationFrame(tick);
   sunDuelFrame();
+  // requestAnimationFrame hands us the timestamp; the very first call comes
+  // from below and does not, and a car moved by an undefined delta goes to NaN
+  // and never comes back.
+  simFrame(now || (window.performance ? performance.now() : Date.now()));
   updateCamera();
   updateGizmo();
   document.getElementById("cneedle").setAttribute(
@@ -12079,6 +12284,11 @@ function setTab(t) {
   syncViewBtns();
   document.getElementById("town").style.display = (t === "city") ? "" : "none";
   document.getElementById("ctxbtn").style.display = model ? "none" : "";
+  document.getElementById("simbtn").style.display = model ? "none" : "";
+  // Stopped rather than hidden on the way out: the cars are in the city scene,
+  // which another tab does not draw, so they would be a few hundred invisible
+  // objects being moved every frame for nobody.
+  if (model && SIM.on) setSim(false);
   syncCompass();
   hideCtxMenu();
   marqBox(false); schDrag = null; drag = null;    // no band left stranded across a tab
@@ -12242,7 +12452,9 @@ if (/[?&]debug=1/.test(location.search)) {
                       VGIZ: VGIZ, cgizTarget: cgizTarget, updateVGizmo: updateVGizmo,
                       setCityGiz: setCityGiz, setCitySub: setCitySub,
                       axisById: axisById, schLocalQuat: schLocalQuat,
-                      updateGizmo: updateGizmo, citySubVerts: citySubVerts };
+                      updateGizmo: updateGizmo, citySubVerts: citySubVerts,
+                      SIM: SIM, setSim: setSim, simLanes: simLanes,
+                      simBuild: simBuild, simFrame: simFrame, carRoot: carRoot };
 }
 
 // ?selftest=1 asserts pan direction. Panning is grab-the-world: the ground must
