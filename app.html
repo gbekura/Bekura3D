@@ -6201,7 +6201,9 @@ function gameVerdictHint(won, sub) {
   return '<b style="color:' + col + '">' + word + '</b> ' + (sub || "");
 }
 
-function gameClock(secs, onEnd) {
+// `onTick` runs on every second the clock actually changes, so a deadline can
+// warn before it arrives instead of only acting when it has.
+function gameClock(secs, onEnd, onTick) {
   var G = SC.game;
   if (G.iv) clearInterval(G.iv);
   G.iv = null; G.secs = secs;
@@ -6211,6 +6213,7 @@ function gameClock(secs, onEnd) {
     var left = Math.max(0, Math.round((end - Date.now()) / 1000));
     if (left === G.secs) return;
     G.secs = left;
+    if (onTick) onTick(left);
     schRenderPanel();
     if (left <= 0) { clearInterval(G.iv); G.iv = null; if (onEnd) onEnd(); }
   }, 250);
@@ -6232,13 +6235,34 @@ function gameClearBoard() {
 // scores honestly.
 function duoBuildClock() {
   gameClock(DUOBUILD, function () {
-    if (SC.game.phase === "build" || SC.game.phase === "fill") {
-      document.getElementById("hint").innerHTML =
-        "<b>დრო ამოიწურა.</b> რაც ააშენე, ის იგზავნება.";
-      if (SC.game.id === "decoy") decoyShelve(true);
-      else gameSend(true);
-    }
+    var G = SC.game;
+    if (G.phase !== "build" && G.phase !== "fill") return;
+    // Remembered rather than only announced. The hand-over on the next line
+    // rewrites the hint in the same tick, so a "დრო ამოიწურა" written here was
+    // never on screen for a single frame: the child saw the board change with
+    // nothing saying why, which reads as the other player having pulled them
+    // out of building. duoLate() puts it back on whatever screen they land on.
+    G.late = true;
+    if (G.id === "decoy") decoyShelve(true);
+    else gameSend(true);
+  }, function (left) {
+    // The minute must not arrive as a surprise. Ten seconds is enough to put a
+    // last shape down and press the button — and it is written once, not every
+    // second, so it cannot bury the reason a hand-over was just refused.
+    var G = SC.game;
+    if (left !== 10 || (G.phase !== "build" && G.phase !== "fill")) return;
+    document.getElementById("hint").innerHTML =
+      '<b style="color:#E4736B">10 წამი დარჩა.</b> დაასრულე და ' +
+      "<b>გადაეცი მეორეს</b> — თორემ რაც ააშენე, ისე გაიგზავნება.";
   });
+}
+// A child moved on by the clock rather than by their own hand is told so on
+// whatever screen they land on. Cleared as it is read: it explains the jump
+// once and then gets out of the way.
+function duoLate() {
+  if (!SC.game.late) return "";
+  SC.game.late = false;
+  return '<b style="color:#E4736B">დრო ამოიწურა — რაც ააშენე, ის გაიგზავნა.</b> ';
 }
 // The answering half: rebuilding from memory, or picking the piece.
 function duoAnswerClock() {
@@ -6278,7 +6302,7 @@ function gameSend(auto) {
     if (G.target) duoStudy();
     else {
       G.phase = "waitpeer";
-      document.getElementById("hint").innerHTML =
+      document.getElementById("hint").innerHTML = duoLate() +
         "<b>გაგზავნილია.</b> მეორეც ამთავრებს — დაელოდე.";
     }
     schRenderPanel();
@@ -6351,7 +6375,7 @@ function duoStudy() {
   if (G.id === "duele") {
     G.phase = "copy";
     schShowGhost(G.target);
-    document.getElementById("hint").innerHTML =
+    document.getElementById("hint").innerHTML = duoLate() +
       "<b>გაიმეორე გამჭვირვალე მოდელი.</b> ვერ შეეხები — შენსას მის ადგილას ააშენებ. " +
       DUOANSWER + " წამი.";
     duoAnswerClock();
@@ -6367,7 +6391,7 @@ function duoStudy() {
   });
   schRebuild();
   schRefreshHelpers();
-  document.getElementById("hint").innerHTML =
+  document.getElementById("hint").innerHTML = duoLate() +
     "<b>დაიმახსოვრე მეორის მოდელი.</b> მოატრიალე, დააკვირდი — 15 წამში გაქრება.";
   gameClock(15, function () {
     SC.game.phase = "copy";
@@ -6458,7 +6482,16 @@ function gameFinish() {
 function gameRoundAgain(fromNet) {
   if (GNET.on && !fromNet) GNET.send({ t: "reset" });
   gameReset();
-  if (GNET.on && !gameCanAct(0)) gameWaitFor("მეორე აშენებს — დაელოდე.");
+  // Exactly the test gameEnter makes, and for the same reasons: მზის დუელი
+  // alternates from the first move and the simultaneous games start both
+  // children building at once, so none of the three parks anybody. Round two
+  // used to park the joiner in all of them — a wait screen with no board and no
+  // გადაეცი მეორეს button, and behind it a deadline that could never fire,
+  // because the clock only acts on a child who is still building. The host went
+  // on playing and the guest could only watch: one child pressed hand over, and
+  // the other had never been allowed to start.
+  if (GNET.on && !gameCanAct(0) && SC.game.id !== "sun" && !gameDuo())
+    gameWaitFor("მეორე აშენებს — დაელოდე.");
 }
 // Put the original back next to nothing, so the two can be compared by eye as
 // well as by number — the percentage says how close, the models say how.
@@ -6481,7 +6514,7 @@ function gameReset() {
   G.phase = "build"; G.target = null; G.shots = null; G.score = null;
   // Both halves of a simultaneous round. A leftover here would make the next
   // round think one side had already answered, and skip straight past a child.
-  G.sent = false; G.peerScore = null;
+  G.sent = false; G.peerScore = null; G.late = false;
   G.shelved = false; G.myPieces = null; G.myHumanAt = -1;
   G.picked = -1; G.peerPicked = -1; G.pieces = null;
   G.iFound = false; G.theyFound = false;
@@ -7049,7 +7082,7 @@ function gameEnter(id) {
   SC.game.pieces = null; SC.game.pieceOf = null; SC.game.picked = -1;
   // The simultaneous games keep both halves of the round: what I sent and what
   // arrived, my answer and theirs. Cleared here so a second round starts clean.
-  SC.game.sent = false; SC.game.peerScore = null;
+  SC.game.sent = false; SC.game.peerScore = null; SC.game.late = false;
   SC.game.shelved = false; SC.game.myPieces = null; SC.game.myHumanAt = -1;
   SC.game.peerPicked = -1; SC.game.peerDone = false;
   SC.game.myName = null; SC.game.peerName = null; SC.game.won = undefined;
@@ -7718,12 +7751,12 @@ function decoyShelve(auto) {
       G.phase = "guess"; G.picked = -1;
       decoyDrawShelf();
       duoAnswerClock();
-      document.getElementById("hint").innerHTML =
+      document.getElementById("hint").innerHTML = duoLate() +
         "<b>რომელია მეორის ნახელავი?</b> დააწკაპუნე მასზე — " + DUOANSWER + " წამი.";
     } else {
       G.phase = "waitpeer";
       gameClearBoard();
-      document.getElementById("hint").innerHTML =
+      document.getElementById("hint").innerHTML = duoLate() +
         "<b>თარო დადგმულია.</b> მეორეც ავსებს — დაელოდე.";
     }
     schRenderPanel();
