@@ -598,6 +598,8 @@
       <h3>ᲚᲔᲒᲔᲜᲓᲐ</h3>
       <div id="legend"><p class="empty">ჯერ არაფერია დახატული.</p></div>
       <div class="total" id="totals"></div>
+      <!-- renderLegend hides this while there is nothing drawn to export. -->
+      <button class="mini" id="zexp" style="width:100%;margin-top:10px;display:none">ზონირების ცხრილი სურათად</button>
     </section>
    </div>
   </div>
@@ -4520,7 +4522,10 @@ function updateCtxUI() {
 }
 
 // ---------------------------------------------------------------- legend
-function renderLegend() {
+// What the plan adds up to, as data rather than as markup. The panel draws it
+// and so does the exported sheet: two readers of one calculation, so a team
+// cannot be handed a picture that disagrees with the panel it was taken from.
+function zoneReport() {
   var zoned = {}, massed = {}, gfa = 0, pathLen = 0, pathW = [], ownN = 0;
   items().forEach(function (it) {
     if (it.color) ownN++;
@@ -4539,63 +4544,256 @@ function renderLegend() {
       pathW.push(it.width);
     }
   });
-  var sa0 = siteArea(state.town);
-  var den0 = sa0 > 0 ? sa0 : townSize(state.town) * townSize(state.town);
-  var el = document.getElementById("legend"), html = "", total = 0, zsum = 0;
-  ZONES.forEach(function (z) {
-    if (!zoned[z.id] && !massed[z.id]) return;
-    total += massed[z.id] || 0;
-    zsum  += zoned[z.id] || 0;
-    // The zoned share is the number that matters when balancing a district, but
-    // a zone can be both drawn and built on, and reporting only the outline hid
-    // everything standing inside it.
-    var right = zoned[z.id]
-      ? fmtArea(zoned[z.id]) + ' · ' + (zoned[z.id] / den0 * 100).toFixed(1) + '%'
-      : Math.round(massed[z.id]).toLocaleString() + ' მ²';
-    if (zoned[z.id] && massed[z.id])
-      right += ' · <span style="opacity:.7">' +
-               Math.round(massed[z.id]).toLocaleString() + ' მ² აშენებული</span>';
-    html += '<div class="leg"><span class="sw" style="background:' + z.color + '"></span>' +
-            '<span class="nm">' + z.ka + zoneCodeTag(z) + '</span>' +
-            '<span class="ar">' + right + '</span></div>';
-  });
-  if (pathLen > 0) {
-    // A line is only a route once you know how wide it is: three metres is a
-    // footpath and thirteen is a street, and the fire-truck check in D3B3 turns
-    // on exactly that number. One figure when they agree, a range when not.
-    var wLo = Math.min.apply(null, pathW), wHi = Math.max.apply(null, pathW);
-    var wTxt = wLo === wHi ? wLo + ' მ' : wLo + '-' + wHi + ' მ';
-    html += '<div class="leg"><span class="sw" style="background:' + PATH.color + '"></span>' +
-            '<span class="nm">' + PATH.ka + ' <i>' + wTxt + '</i></span>' +
-            '<span class="ar">' + Math.round(pathLen).toLocaleString() + ' მ</span></div>';
-  }
-  el.innerHTML = html || '<p class="empty">ჯერ არაფერია დახატული.</p>';
-
   // Percentages are of the DRAWN working area, not the whole map square. A
   // team needs to know it has used 40% of its own district; "0.1% of Telavi"
   // tells them nothing. Falls back to the map square if no area is marked yet.
+  var site = siteArea(state.town);
+  var den = site > 0 ? site : townSize(state.town) * townSize(state.town);
+  var rows = [], zsum = 0, total = 0;
+  ZONES.forEach(function (z) {
+    if (!zoned[z.id] && !massed[z.id]) return;
+    var a = zoned[z.id] || 0, m = massed[z.id] || 0;
+    zsum += a; total += m;
+    rows.push({ zone: z, area: a, built: m, share: den > 0 ? a / den * 100 : 0 });
+  });
+  return {
+    rows: rows, site: site, den: den, sited: site > 0,
+    zoned: zsum, built: total, gfa: gfa, ownN: ownN,
+    // A line is only a route once you know how wide it is: three metres is a
+    // footpath and thirteen is a street, and the fire-truck check in D3B3 turns
+    // on exactly that number. One figure when they agree, a range when not.
+    path: pathLen > 0 ? { len: pathLen, lo: Math.min.apply(null, pathW),
+                          hi: Math.max.apply(null, pathW) } : null
+  };
+}
+// The footer figures, in reading order. Shared for the same reason as the rest.
+function zoneTotals(R) {
   var parts = [];
-  if (sa0 > 0) parts.push("ტერიტორია " + fmtArea(sa0));
-  if (zsum > 0) parts.push("დაზონირებული " + fmtArea(zsum) +
-                           " — " + (zsum / den0 * 100).toFixed(1) + "%");
-  if (total > 0) {
-    // the one area in the footer that had no share of the site, though the
-    // denominator was already sitting two lines above it
-    parts.push("განაშენიანება " + Math.round(total).toLocaleString() + " მ²" +
-               " — " + (total / den0 * 100).toFixed(1) + "%");
-  }
-  if (gfa > 0) {
-    parts.push("სართულების ფართობი " + Math.round(gfa).toLocaleString() + " მ²");
+  if (R.sited) parts.push("ტერიტორია " + fmtArea(R.site));
+  if (R.zoned > 0) parts.push("დაზონირებული " + fmtArea(R.zoned) +
+                              " — " + (R.zoned / R.den * 100).toFixed(1) + "%");
+  // the one area in the footer that had no share of the site, though the
+  // denominator was already sitting two lines above it
+  if (R.built > 0) parts.push("განაშენიანება " + Math.round(R.built).toLocaleString() +
+                              " მ² — " + (R.built / R.den * 100).toFixed(1) + "%");
+  if (R.gfa > 0) {
+    parts.push("სართულების ფართობი " + Math.round(R.gfa).toLocaleString() + " მ²");
     // Floor-area ratio: the single number planners argue about, and the one a
     // storey slider is for. Against the drawn territory, like every other share.
-    parts.push("სიმჭიდროვე " + (gfa / den0).toFixed(2));
+    parts.push("სიმჭიდროვე " + (R.gfa / R.den).toFixed(2));
   }
-  // The rows above bucket strictly by ზონა and paint their swatch from the
-  // zone, so an object given its own colour sits under a swatch it no longer
-  // matches. The areas and shares stay honest — they read .type — but the key
-  // does not, and a team reading its own plan deserves to be told how many.
-  if (ownN > 0) parts.push(ownN + " ფერშეცვლილი");
-  document.getElementById("totals").innerHTML = parts.join(" · ");
+  // The rows bucket strictly by ზონა and paint their swatch from the zone, so an
+  // object given its own colour sits under a swatch it no longer matches. The
+  // areas and shares stay honest — they read .type — but the key does not, and a
+  // team reading its own plan deserves to be told how many.
+  if (R.ownN > 0) parts.push(R.ownN + " ფერშეცვლილი");
+  return parts;
+}
+// How a path's width reads: one figure when every path agrees, a range when not.
+function zonePathWidth(p) { return p.lo === p.hi ? p.lo + " მ" : p.lo + "-" + p.hi + " მ"; }
+// The right-hand figures for one zone row. A zone can be both drawn and built
+// on, and reporting only the outline hid everything standing inside it.
+function zoneRowFigures(r) {
+  var out = r.area ? fmtArea(r.area) + " · " + r.share.toFixed(1) + "%"
+                   : Math.round(r.built).toLocaleString() + " მ²";
+  if (r.area && r.built) out += " · " + Math.round(r.built).toLocaleString() + " მ² აშენებული";
+  return out;
+}
+
+function renderLegend() {
+  var R = zoneReport(), html = "";
+  R.rows.forEach(function (r) {
+    var right = r.area
+      ? fmtArea(r.area) + ' · ' + r.share.toFixed(1) + '%'
+      : Math.round(r.built).toLocaleString() + ' მ²';
+    if (r.area && r.built)
+      right += ' · <span style="opacity:.7">' +
+               Math.round(r.built).toLocaleString() + ' მ² აშენებული</span>';
+    html += '<div class="leg"><span class="sw" style="background:' + r.zone.color + '"></span>' +
+            '<span class="nm">' + r.zone.ka + zoneCodeTag(r.zone) + '</span>' +
+            '<span class="ar">' + right + '</span></div>';
+  });
+  if (R.path) {
+    html += '<div class="leg"><span class="sw" style="background:' + PATH.color + '"></span>' +
+            '<span class="nm">' + PATH.ka + ' <i>' + zonePathWidth(R.path) + '</i></span>' +
+            '<span class="ar">' + Math.round(R.path.len).toLocaleString() + ' მ</span></div>';
+  }
+  document.getElementById("legend").innerHTML = html ||
+    '<p class="empty">ჯერ არაფერია დახატული.</p>';
+  document.getElementById("totals").innerHTML = zoneTotals(R).join(" · ");
+  // An empty plan has nothing to export, and a button that hands back a blank
+  // sheet teaches a child that the button is broken.
+  var b = document.getElementById("zexp");
+  if (b) b.style.display = (R.rows.length || R.path) ? "" : "none";
+}
+
+// ------------------------------------------------- the legend, as a picture
+// A team's balance sheet: which zone, what colour, how much ground and what
+// share of their own territory. The panel version scrolls inside a 300 px
+// column and disappears the moment the tab changes; this one goes on a wall
+// next to the plan, and into a report.
+//
+// Drawn on white rather than in the app's navy. It is made to be printed, and
+// the swatches are the point — a dark ground shifts every one of them.
+var ZSHEET = { w: 780, pad: 34, row: 46, scale: 2,
+               ink: "#1D3053", dim: "#6B7A93", rule: "#DCE3ED", track: "#EEF1F6" };
+function zkaFont(spec) { return spec + " 'Maketi Sans','DejaVu Sans',sans-serif"; }
+function zrect(c, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+// Greedy packing, so the footer breaks between figures and never through one.
+function zpack(c, parts, maxW, sep) {
+  var lines = [], cur = "";
+  parts.forEach(function (p) {
+    var test = cur ? cur + sep + p : p;
+    if (cur && c.measureText(test).width > maxW) { lines.push(cur); cur = p; }
+    else cur = test;
+  });
+  if (cur) lines.push(cur);
+  return lines;
+}
+function zoneSheetTitle() {
+  var t = TOWNS[state.town];
+  return (t ? t.ka : state.town) + " · ვარიანტი " + state.variant;
+}
+// Written out rather than toLocaleDateString: the browsers on these laptops do
+// not agree on what a Georgian date looks like, and a sheet that goes in a
+// report should not change shape with the machine that made it.
+function zoneSheetDate() {
+  var d = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; };
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+}
+function zoningSheet() {
+  var R = zoneReport(), Z = ZSHEET;
+  var rows = R.rows.slice();
+  if (R.path) rows.push({ path: R.path });
+  var totals = zoneTotals(R);
+
+  // Measured on a throwaway context first: the footer's height depends on how
+  // many lines the figures pack into, and the canvas has to be tall enough
+  // before anything is drawn on it.
+  var probe = document.createElement("canvas").getContext("2d");
+  probe.font = zkaFont("12.5px");
+  var footLines = totals.length ? zpack(probe, totals, Z.w - Z.pad * 2, "   ·   ") : [];
+  var head = 116, foot = footLines.length ? footLines.length * 20 + 26 : 10;
+  var h = head + rows.length * Z.row + foot + Z.pad;
+
+  var cv = document.createElement("canvas");
+  cv.width = Z.w * Z.scale; cv.height = h * Z.scale;
+  var c = cv.getContext("2d");
+  c.scale(Z.scale, Z.scale);
+  c.textBaseline = "alphabetic";
+
+  c.fillStyle = "#FFFFFF"; c.fillRect(0, 0, Z.w, h);
+
+  c.fillStyle = Z.ink; c.font = zkaFont("bold 21px");
+  c.fillText(zoneSheetTitle(), Z.pad, 48);
+  c.fillStyle = Z.dim; c.font = zkaFont("13px");
+  c.fillText("ზონირება · " + zoneSheetDate() +
+             (R.sited ? " · ტერიტორია " + fmtArea(R.site) : ""), Z.pad, 71);
+  c.fillStyle = Z.rule; c.fillRect(Z.pad, 92, Z.w - Z.pad * 2, 1);
+
+  // Column headings, so the two right-hand numbers are not a guess.
+  c.fillStyle = Z.dim; c.font = zkaFont("11.5px");
+  c.textAlign = "right";
+  c.fillText("წილი", Z.w - Z.pad, 110);
+  c.textAlign = "left";
+
+  // One track width for every row, so the bars can be read against each other
+  // and not only against their own number. It is the widest bar that still
+  // clears the longest row of figures, measured rather than guessed at: a fixed
+  // column is either wasteful or something a long row runs straight into.
+  probe.font = zkaFont("12px");
+  var figW = 0;
+  rows.forEach(function (r) {
+    figW = Math.max(figW, probe.measureText(r.path ? "სიგრძე" : zoneRowFigures(r)).width);
+  });
+  var barX = Z.pad + 34, barW = Math.max(80, Z.w - Z.pad - figW - 18 - barX);
+
+  rows.forEach(function (r, i) {
+    var y = head + i * Z.row;
+    if (i) { c.fillStyle = "#F1F4F8"; c.fillRect(Z.pad, y - 6, Z.w - Z.pad * 2, 1); }
+
+    var col = r.path ? PATH.color : r.zone.color;
+    c.fillStyle = col; zrect(c, Z.pad, y + 5, 22, 22, 5); c.fill();
+    c.strokeStyle = "rgba(29,48,83,.22)"; c.lineWidth = 1;
+    zrect(c, Z.pad + 0.5, y + 5.5, 21, 21, 5); c.stroke();
+
+    var name = r.path ? PATH.ka : r.zone.ka;
+    var code = r.path ? zonePathWidth(r.path) : (r.zone.code || "");
+    c.fillStyle = Z.ink; c.font = zkaFont("bold 14.5px");
+    c.fillText(name, barX, y + 19);
+    if (code) {
+      var nameW = c.measureText(name).width;      // measured in the face it was drawn in
+      c.fillStyle = Z.dim; c.font = zkaFont("italic 12px");
+      c.fillText(code, barX + nameW + 8, y + 19);
+    }
+
+    // The track is the whole territory, so the empty part of it is the part
+    // nobody has zoned yet — which is the thing a team argues about.
+    if (!r.path) {
+      c.fillStyle = Z.track; zrect(c, barX, y + 28, barW, 7, 3.5); c.fill();
+      // A zone that exists at all gets a visible sliver: at half a per cent the
+      // honest width is under a pixel, and a row with no bar reads as a row with
+      // no land rather than as a small one.
+      var w = Math.min(barW, Math.max(r.share > 0 ? 3 : 0, barW * r.share / 100));
+      if (w > 0) { c.fillStyle = r.zone.color; zrect(c, barX, y + 28, w, 7, 3.5); c.fill(); }
+    }
+
+    c.textAlign = "right";
+    c.fillStyle = Z.ink; c.font = zkaFont("bold 15px");
+    c.fillText(r.path ? Math.round(r.path.len).toLocaleString() + " მ"
+                      : (r.area ? r.share.toFixed(1) + "%" : "—"), Z.w - Z.pad, y + 19);
+    c.fillStyle = Z.dim; c.font = zkaFont("12px");
+    c.fillText(r.path ? "სიგრძე" : zoneRowFigures(r), Z.w - Z.pad, y + 35);
+    c.textAlign = "left";
+  });
+
+  if (footLines.length) {
+    var fy = head + rows.length * Z.row + 8;
+    c.fillStyle = Z.rule; c.fillRect(Z.pad, fy, Z.w - Z.pad * 2, 1);
+    c.fillStyle = Z.dim; c.font = zkaFont("12.5px");
+    footLines.forEach(function (l, i) { c.fillText(l, Z.pad, fy + 22 + i * 20); });
+  }
+  return cv;
+}
+function zoningSheetName() {
+  return "bekura3d-" + state.town + "-" + state.variant + "-ზონირება.png";
+}
+function exportZoning() {
+  var R = zoneReport();
+  if (!R.rows.length && !R.path) {
+    document.getElementById("hint").textContent =
+      "ჯერ არაფერია დასაზონირებელი — დახატე ზონა, მერე ექსპორტი.";
+    return;
+  }
+  // The sheet is nothing but text in a Georgian face, so it is drawn only once
+  // the browser actually has that face. Canvas does not wait for webfonts the
+  // way the page does, and a sheet drawn too early comes out in the fallback.
+  function go() {
+    var cv = zoningSheet(), name = zoningSheetName();
+    function done() {
+      document.getElementById("hint").innerHTML =
+        "ზონირების ცხრილი ჩამოიტვირთა: <b>" + name + "</b>. თუ ბრაუზერმა არ გკითხა " +
+        "სად შეინახოს, ის ჩამოტვირთვების საქაღალდეშია.";
+    }
+    if (cv.toBlob) { cv.toBlob(function (b) { if (b) { downloadBlob(b, name); done(); } }, "image/png"); return; }
+    var url = cv.toDataURL("image/png"), bin = atob(url.split(",")[1]);
+    var buf = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    downloadBlob(new Blob([buf], { type: "image/png" }), name);
+    done();
+  }
+  if (document.fonts && document.fonts.ready && document.fonts.ready.then)
+    document.fonts.ready.then(go, go);
+  else go();
 }
 
 // ---------------------------------------------------------------- labels
@@ -5628,6 +5826,10 @@ function shotName() {
               + "-" + (SC.variant || "A");
   return "bekura3d-" + (base.replace(/^-+/, "") || "shot") + ".png";
 }
+
+// Static markup in the ქალაქი panel, so this is wired once rather than on every
+// legend render — renderLegend only shows and hides it.
+document.getElementById("zexp").addEventListener("click", function () { exportZoning(); });
 
 document.getElementById("shot").addEventListener("click", function () {
   renderer.render(!isCity() ? SC.scene : scene, camera);
@@ -12507,6 +12709,11 @@ if (/[?&]debug=1/.test(location.search)) {
                       schSubSels: schSubSels, schSubToggle: schSubToggle,
                       schDrawing: schDrawing, schPlanAndElevation: schPlanAndElevation,
                       schShadowPlan: schShadowPlan, sunVec: sunVec,
+                      // The zoning sheet, alongside the other drawing exporters:
+                      // the arithmetic is worth asserting on, and the picture is
+                      // worth looking at without going through a download.
+                      zoneReport: zoneReport, zoneTotals: zoneTotals,
+                      zoningSheet: zoningSheet, renderLegend: renderLegend,
                       modelMatch: modelMatch, modelBox: modelBox,
                       // The games, so a round can be driven end to end from
                       // outside without synthesising pointer events at
@@ -13801,6 +14008,56 @@ if (/[?&]selftest=1/.test(location.search)) {
   SC.planName = "ჩვენი სკოლა";
   want("a named plan names its own photo", shotName(), "bekura3d-ჩვენი-სკოლა-A.png");
   state.tab = keepTab; SC.planName = keepPN; SC.variant = keepVar; SC.activeDoc = keepDoc;
+
+  // ---- ზონირების ცხრილი --------------------------------------------------
+  // The panel and the exported sheet read one calculation, so asserting the
+  // calculation covers both. These numbers are the whole point of the sheet: a
+  // team balances a district by them, and a wrong one is not visibly wrong.
+  var _zTab = state.tab, _zTown = state.town, _zVar = state.variant;
+  state.tab = "city"; state.town = "telavi"; state.variant = "A";
+  var _zIt = items(), _zKeep = _zIt.slice();
+  _zIt.length = 0;
+  function zring(x, z, w, d) { return [[x, z], [x + w, z], [x + w, z + d], [x, z + d]]; }
+  _zIt.push({ id: 1, kind: "area", type: "res1",  pts: zring(0,   0, 300, 250) });  // 75 000
+  _zIt.push({ id: 2, kind: "area", type: "res1",  pts: zring(0, 300, 100, 100) });  // 10 000
+  _zIt.push({ id: 3, kind: "area", type: "green", pts: zring(400, 0, 200, 100) });  // 20 000
+  _zIt.push({ id: 4, kind: "zone", type: "res1", w: 40, d: 30, h: 10.5 });   // 1 200 m², 3 floors
+  _zIt.push({ id: 5, kind: "zone", type: "pub",  w: 20, d: 10, h: 7 });      //   200 m², 2 floors
+  _zIt.push({ id: 6, kind: "path", pts: [[0, 0], [100, 0]], width: 8 });
+  var _zR = zoneReport();
+  // Rows come out in ZONES order, so res1, then pub, then green.
+  want("two outlines of one zone are added together", _zR.rows[0].area, 85000);
+  want("a zone appears once however many outlines it has", _zR.rows.length, 3);
+  want("a zone that is only built on still appears", _zR.rows[1].zone.id, "pub");
+  want("and it is reported as building, not as ground", _zR.rows[1].area, 0);
+  want("what stands inside a zone is counted apart from it", _zR.rows[0].built, 1200);
+  want("the zoned total is the sum of the outlines", _zR.zoned, 105000);
+  want("floor area counts storeys, not footprints", _zR.gfa, 1200 * 3 + 200 * 2);
+  // The share is of the team's own working area. Against the whole map square a
+  // district reads as a rounding error and tells them nothing.
+  want("a share is the zone's part of the working area",
+       _zR.rows[0].share.toFixed(2), (85000 / siteArea("telavi") * 100).toFixed(2));
+  want("a path is not a zone", _zR.rows.length, 3);
+  want("but its length is still reported", Math.round(_zR.path.len), 100);
+  want("one width reads as a figure", zonePathWidth({ lo: 8, hi: 8 }), "8 მ");
+  want("two widths read as a range", zonePathWidth({ lo: 6, hi: 12 }), "6-12 მ");
+  want("a zone both drawn and built on reports both",
+       zoneRowFigures({ area: 10000, built: 500, share: 2 }).indexOf("აშენებული") > 0, true);
+  want("a zone that is only built on reports no share",
+       zoneRowFigures({ area: 0, built: 500, share: 0 }).indexOf("%") < 0, true);
+  // The sheet measures its own height from the rows it is given. A fixed height
+  // would crop the last zone of a busy plan, which is the plan worth exporting.
+  var _zTall = zoningSheet();
+  want("the sheet is drawn at the declared width", _zTall.width, ZSHEET.w * ZSHEET.scale);
+  _zIt.splice(2, 1);                                   // the green outline leaves
+  want("a zone leaving the plan leaves the sheet", zoneReport().rows.length, 2);
+  want("and the sheet gets shorter with it", zoningSheet().height < _zTall.height, true);
+  _zIt.length = 0;
+  var _zNil = zoneReport();
+  want("an empty plan has no rows to export", _zNil.rows.length, 0);
+  want("and no paths either", _zNil.path, null);
+  _zKeep.forEach(function (q) { _zIt.push(q); });
+  state.tab = _zTab; state.town = _zTown; state.variant = _zVar;
 
   // ---- the game plot -----------------------------------------------------
   // A game is played inside 90 × 90 × 90 metres. Placing respected that from the
